@@ -62,7 +62,7 @@
         if (o.status === "waiting") return `
           <div class="offer">
             <b>Can you work ${esc(o.shift_name)} on ${esc(o.date)}, ${esc(o.start)}-${esc(o.end)}?</b>
-            <p class="muted">Please answer within ${data.timeout_minutes} minutes.</p>
+            <p class="muted">Please answer within ${timeLeft(o.seconds_left)}.</p>
             <div class="row">
               <button class="yes" onclick="answer(${o.id}, 'yes')">Accept</button>
               <button class="no" onclick="answer(${o.id}, 'no')">Decline</button>
@@ -83,6 +83,12 @@
         showMsg(r.message);
       } catch (e) { showMsg(e.message); }
       loadInbox(); loadShifts();
+    }
+
+    // "2 min 40 s" / "18 seconds": the real time left (already sped up in demo mode).
+    function timeLeft(s) {
+      if (s >= 60) return `${Math.floor(s / 60)} min ${s % 60} s`;
+      return `${s} seconds`;
     }
 
     function notify(title, body) {
