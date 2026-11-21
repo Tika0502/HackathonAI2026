@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS workers (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     pin TEXT NOT NULL,
-    role TEXT,                              -- Cashier / Stock (NULL for the manager)
     is_manager INTEGER NOT NULL DEFAULT 0,
     is_demo INTEGER NOT NULL DEFAULT 0      -- 1 = a real person uses this login in the demo (never auto-answered)
 );
@@ -20,7 +19,6 @@ CREATE TABLE IF NOT EXISTS shifts (
     name TEXT NOT NULL,                     -- Morning / Evening
     start TEXT NOT NULL,                    -- 14:00
     end TEXT NOT NULL,                      -- 22:00
-    role TEXT NOT NULL DEFAULT 'Any',       -- which role this shift needs (Cashier / Stock)
     needed INTEGER NOT NULL
 );
 
@@ -31,8 +29,8 @@ CREATE TABLE IF NOT EXISTS assignments (
     worker_id INTEGER NOT NULL,
     start TEXT NOT NULL,
     end TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'working', -- working / sick
-    is_replacement INTEGER NOT NULL DEFAULT 0
+    status TEXT NOT NULL DEFAULT 'working', -- working / sick / removed (manager needed fewer people)
+    is_replacement INTEGER NOT NULL DEFAULT 0  -- 1 = covered a sick colleague
 );
 
 -- Spots the agent must fill
@@ -41,7 +39,7 @@ CREATE TABLE IF NOT EXISTS open_spots (
     shift_id INTEGER NOT NULL,
     start TEXT NOT NULL,
     end TEXT NOT NULL,
-    reason TEXT NOT NULL,                   -- plan / sick / surge / partly
+    reason TEXT NOT NULL,                   -- plan / sick / surge
     status TEXT NOT NULL DEFAULT 'open',    -- open / filled / unfilled / cancelled
     filled_by INTEGER,
     created_at TEXT NOT NULL
@@ -53,8 +51,7 @@ CREATE TABLE IF NOT EXISTS offers (
     spot_id INTEGER NOT NULL,
     worker_id INTEGER NOT NULL,
     wave INTEGER NOT NULL DEFAULT 1,
-    status TEXT NOT NULL DEFAULT 'waiting', -- waiting / yes / no / partly / timeout / too_late
-    partly_until TEXT,
+    status TEXT NOT NULL DEFAULT 'waiting', -- waiting / yes / no / timeout / cancelled / too_late
     sent_at TEXT NOT NULL,
     answered_at TEXT
 );
@@ -80,6 +77,14 @@ CREATE TABLE IF NOT EXISTS shift_records (
     is_sick INTEGER NOT NULL DEFAULT 0
 );
 
+-- One-time messages to a worker (e.g. "your shift was cancelled")
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY,
+    worker_id INTEGER NOT NULL,
+    time TEXT NOT NULL,
+    text TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -89,7 +94,8 @@ CREATE TABLE IF NOT EXISTS settings (
 DEFAULT_SETTINGS = {
     "hourly_rate": "2500",            # one rate for everyone
     "currency": "HUF",
-    "offer_timeout_seconds": "60",    # set lower (e.g. 20) to speed up the demo
+    "offer_timeout_minutes": "3",     # how long a worker has to answer: 3 (default) or 5
+    "demo_speed": "1",                # 1 = real time. 10 = everything 10x faster (for the demo)
     "use_ai": "1",                    # 1 = OpenAI agent decides, 0 = plain-code rules
     "bots_on": "1",                   # 1 = fake workers answer offers by themselves
 }
