@@ -12,14 +12,14 @@ main { max-width: 1100px; margin: 0 auto; padding: 12px; }
 @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
 input, select, button { font-size: 16px; padding: 10px; border-radius: 8px; border: 1px solid #c8ccd4; }
 button { cursor: pointer; background: #1f4e79; color: #fff; border: none; }
-button.yes { background: #2e7d32; } button.no { background: #c62828; }
+button.yes { background: #2e7d32; } button.no { background: #c62828; } button.partly { background: #ef8f00; }
 button.light { background: #e8ebf0; color: #1d2330; }
 button:disabled { opacity: .5; }
 .full { width: 100%; }
 .muted { color: #6b7280; font-size: 13px; }
 .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #e8ebf0; }
 .pill.working { background: #dcedc8; } .pill.sick { background: #ffcdd2; } .pill.open { background: #fff3c4; }
-.pill.yes { background: #dcedc8; } .pill.no { background: #ffcdd2; }
+.pill.yes { background: #dcedc8; } .pill.no { background: #ffcdd2; } .pill.partly { background: #ffe0b2; }
 .pill.timeout, .pill.too_late { background: #e0e0e0; } .pill.waiting { background: #bbdefb; }
 .pill.unfilled { background: #ffcdd2; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -29,13 +29,71 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
 .log .manager { font-weight: 600; } .log .agent { color: #1f4e79; } .log .system { color: #555; }
 .offer { border: 2px solid #bbdefb; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
 .msg { padding: 10px; border-radius: 8px; background: #e8f5e9; margin-bottom: 10px; display: none; }
-.pill.removed, .pill.cancelled { background: #e0e0e0; }
-/* Manager page: collapsible, draggable panels */
-details.panel > summary { font-weight: 600; font-size: 16px; cursor: grab; list-style: none; }
-details.panel > summary::-webkit-details-marker { display: none; }
-details.panel > summary::after { content: " \25BE"; color: #6b7280; }
-details.panel:not([open]) > summary::after { content: " \25B8"; }
-details.panel .handle { color: #9aa1ad; margin-right: 6px; }
-details.panel.dragging { opacity: .5; }
-.shiftbox { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
-.shiftbox h2 { font-size: 15px; margin: 0 0 8px; }
+
+#planner {padding:0;overflow:hidden;border:1px solid #d5e2df;border-radius:18px;box-shadow:0 6px 24px #173d3910}
+.plan-head,.plan-footer {display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:22px clamp(16px,3vw,32px)}
+.plan-head {background:linear-gradient(110deg,#143d42,#1c5658);color:white}
+#planner h2 {font-size:clamp(22px,3vw,31px);letter-spacing:-.035em;margin:0}
+.plan-head p {margin:6px 0 0;color:#d1e5e2}
+.plan-head label,.plan-footer small {display:grid;gap:5px;font-size:13px}
+.plan-section {padding:18px clamp(16px,3vw,32px)}
+.plan-section + .plan-section {border-top:1px solid #dce7e4}
+.plan-section h3 {margin:0;font-size:20px;color:#173d42}
+.table-scroll {overflow-x:auto}
+#planner th,#planner td {padding:10px 7px;white-space:nowrap}
+#planner tr:first-child th {background:#eff5f3;color:#47645e;font-weight:600;font-size:13px}
+.shift-tag {display:inline-block;border-radius:6px;padding:5px 10px;font-weight:650}
+.shift-0 {background:#fff1ce;color:#79520f}
+.shift-1 {background:#eae7fa;color:#51477f}
+#grid th .muted {display:inline-block;margin:4px 0;font-size:12px;font-weight:400}
+#planner input {color:#173d42;background:white;border:1px solid #b8ccc6;font:inherit;font-variant-numeric:tabular-nums}
+#planner :focus-visible {outline:3px solid #399785;outline-offset:2px}
+.plan-footer {background:#f0f6f4;color:#244740}
+.plan-footer small {margin-top:4px}
+.plan-footer button {background:#14665c;padding:12px 20px;font-weight:650}
+.plan-footer button:hover {background:#0e524a}
+
+:root {--ink:#1c2331;--subtle:#596577;--rule:#e2e6ed;--blue:#245cc7;--ease:cubic-bezier(.22,.72,.24,1);scroll-padding-top:90px}
+body {background:#f4f5f8;color:var(--ink);line-height:1.5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header {position:sticky;top:0;z-index:4;box-sizing:border-box;min-height:58px;padding:10px max(5vw,16px);background:rgba(249,250,252,.94);backdrop-filter:blur(18px);color:var(--ink);border-bottom:1px solid var(--rule);gap:10px;flex-wrap:wrap}
+header h1 {font-size:17px;letter-spacing:-.035em}
+header a,header button {color:var(--ink);background:#e9ecf2;border:0;border-radius:99px;padding:7px 14px;font-size:14px}
+main {padding:clamp(16px,3vw,34px) 16px}
+.card,#planner {border:1px solid var(--rule);border-radius:20px;box-shadow:0 5px 24px #26385409}
+.card {padding:clamp(16px,2.4vw,28px);margin-bottom:18px}
+.card h2,.plan-section h3 {letter-spacing:-.035em;color:var(--ink)}
+.muted {color:var(--subtle)}
+button,.plan-footer button {background:var(--blue);border-radius:12px;font-weight:600}
+button:hover,.plan-footer button:hover {filter:brightness(.94)}
+header button {background:#e9ecf2}
+input,select,#planner input {border:1px solid #cdd3df;border-radius:10px;background:#fff;color:var(--ink)}
+:focus-visible,#planner :focus-visible {outline:3px solid #5585d8;outline-offset:3px}
+.plan-head {color:var(--ink);background:radial-gradient(ellipse at top right,#dde7fc,transparent 65%),linear-gradient(105deg,#f9fafc,#f0f2fa);padding-block:28px}
+#planner h2 {font-size:clamp(26px,4vw,40px);line-height:1.12;letter-spacing:-.052em}
+.plan-head p,.plan-footer small {color:var(--subtle)}
+.plan-head label {font-weight:600;color:#434e62}
+.plan-section h3 {color:var(--ink)}
+#planner tr:first-child th {color:#566073;background:#f6f7fa}
+.plan-footer {background:#f7f8fb;color:var(--ink);border-top:1px solid var(--rule)}
+.plan-footer button:hover {background:#204fa7}
+.section-links {display:flex;gap:4px;width:max-content;max-width:100%;overflow:auto;background:#e8ebf1;border-radius:99px;padding:4px;margin-bottom:16px}
+.section-links a {display:block;padding:6px 16px;color:#374358;text-decoration:none;border-radius:99px;font-size:14px;font-weight:600}
+.section-links a:hover,.section-links a:focus-visible {background:white}
+.login main {padding-top:clamp(36px,11vh,110px)}
+.login .card {padding:30px}
+.login h2 {font-size:30px;letter-spacing:-.05em}
+.login label {display:block;font-size:14px;font-weight:600;margin:15px 0 5px}
+.login button {margin-top:20px}
+.login #error:empty {display:none}
+@media (max-width:600px) {header {position:static} :root {scroll-padding-top:12px} .section-links a {padding-inline:12px} }
+@media (prefers-reduced-motion:no-preference) {
+  html {scroll-behavior:smooth}
+  @view-transition {navigation:auto}
+  ::view-transition-old(root) {animation:page-out 140ms ease-in both}
+  ::view-transition-new(root) {animation:page-in 240ms var(--ease) both}
+  @keyframes page-in {from {opacity:0;transform:translateY(5px)}}
+  @keyframes page-out {to {opacity:0}}
+  button,a,input,select {transition:background-color 160ms ease,box-shadow 160ms ease,transform 160ms var(--ease),filter 160ms ease}
+  button:active {transform:scale(.98)}
+  .msg {animation:page-in 180ms var(--ease)}
+}
