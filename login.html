@@ -3,18 +3,16 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rota Rescue - Log in</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
-<body>
+<body class="login">
   <header><h1>Rota Rescue</h1></header>
   <main style="max-width:420px">
     <div class="card">
       <h2>Log in</h2>
       <p class="muted">Pick your name and type your PIN.</p>
-      <select id="name" class="full"></select>
-      <p></p>
-      <input id="pin" class="full" type="password" inputmode="numeric" placeholder="PIN">
-      <p></p>
+      <label for="name">Name</label><select id="name" class="full"></select>
+      <label for="pin">PIN</label><input id="pin" class="full" type="password" inputmode="numeric">
       <button class="full" onclick="login()">Log in</button>
       <p id="error" style="color:#c62828"></p>
     </div>
