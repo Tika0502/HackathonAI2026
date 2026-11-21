@@ -12,6 +12,22 @@
   </header>
   <main>
     <div id="msg" class="msg"></div>
+
+    <div class="card" id="planner">
+      <h2>1. Plan the next 7 days</h2>
+      <p class="muted">Set the shifts and how many people each role needs. Nobody is contacted until you press
+        <b>Send to agent</b>.</p>
+      <div class="row">Start date: <input id="planStart" type="date">
+        <span id="roleInfo" class="muted"></span></div>
+      <div style="overflow-x:auto"><table id="templates"></table></div>
+      <p class="row"><button class="light" onclick="addTemplate()">+ Add shift</button></p>
+      <h2>2. Workers needed per day</h2>
+      <p class="muted">Change any number, e.g. more people at the weekend. 0 = no shift that day.</p>
+      <div style="overflow-x:auto"><table id="grid"></table></div>
+      <p class="row"><button onclick="sendPlan()">Send to agent</button>
+        <span id="planTotal" class="muted"></span></p>
+    </div>
+
     <div class="card row">
       <b>Day:</b> <select id="day" onchange="loadRota()"></select>
       <button class="light" onclick="closeDay()">Close day (save hours)</button>
@@ -47,17 +63,112 @@
   <script>
     let openShift = null;   // which shift's people list is expanded
 
+    // ---------------------------------------------------------- planner ---
+    let roles = [];
+    let templates = [
+      { name: "Morning", start: "06:00", end: "14:00", role: "Cashier", needed: 3 },
+      { name: "Morning", start: "06:00", end: "14:00", role: "Stock", needed: 2 },
+      { name: "Evening", start: "14:00", end: "22:00", role: "Cashier", needed: 3 },
+      { name: "Evening", start: "14:00", end: "22:00", role: "Stock", needed: 2 },
+    ];
+    let counts = {};   // "templateIndex|date" -> number
+
+    function planDates() {
+      const start = document.getElementById("planStart").value;
+      if (!start) return [];
+      return [...Array(7)].map((_, i) => {
+        const d = new Date(start + "T12:00:00"); d.setDate(d.getDate() + i);
+        return d.toISOString().slice(0, 10);
+      });
+    }
+    function dayLabel(iso) {
+      return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "numeric" });
+    }
+
+    function renderTemplates() {
+      const roleOpts = r => roles.map(x => `<option ${x.role === r ? "selected" : ""}>${esc(x.role)}</option>`).join("");
+      document.getElementById("templates").innerHTML =
+        `<tr><th>Shift</th><th>Start</th><th>End</th><th>Role</th><th>People</th><th></th></tr>` +
+        templates.map((t, i) => `<tr>
+          <td><input value="${esc(t.name)}" style="width:110px" onchange="setT(${i}, 'name', this.value)"></td>
+          <td><input type="time" value="${t.start}" onchange="setT(${i}, 'start', this.value)"></td>
+          <td><input type="time" value="${t.end}" onchange="setT(${i}, 'end', this.value)"></td>
+          <td><select onchange="setT(${i}, 'role', this.value)">${roleOpts(t.role)}</select></td>
+          <td><input type="number" min="0" value="${t.needed}" style="width:70px" onchange="setT(${i}, 'needed', +this.value, true)"></td>
+          <td><button class="light" onclick="removeTemplate(${i})">Remove</button></td></tr>`).join("");
+      renderGrid();
+    }
+    function setT(i, key, value, resetDays) {
+      templates[i][key] = value;
+      if (resetDays) planDates().forEach(d => delete counts[i + "|" + d]);
+      renderGrid();
+    }
+    function addTemplate() {
+      templates.push({ name: "Night", start: "22:00", end: "06:00", role: roles[0]?.role || "Cashier", needed: 1 });
+      counts = {}; renderTemplates();
+    }
+    function removeTemplate(i) { templates.splice(i, 1); counts = {}; renderTemplates(); }
+    function countFor(i, d) { const k = i + "|" + d; return k in counts ? counts[k] : templates[i].needed; }
+
+    function renderGrid() {
+      const dates = planDates();
+      document.getElementById("grid").innerHTML =
+        `<tr><th>Shift</th>${dates.map(d => `<th>${dayLabel(d)}</th>`).join("")}</tr>` +
+        templates.map((t, i) => `<tr><td>${esc(t.name)} ${esc(t.role)}<br><span class="muted">${t.start}-${t.end}</span></td>` +
+          dates.map(d => `<td><input type="number" min="0" value="${countFor(i, d)}" style="width:60px"
+            onchange="counts['${i}|${d}'] = +this.value; showTotal()"></td>`).join("") + `</tr>`).join("");
+      showTotal();
+    }
+    function planRows() {
+      const rows = [];
+      planDates().forEach(d => templates.forEach((t, i) => {
+        const needed = countFor(i, d);
+        if (needed > 0) rows.push({ date: d, name: t.name, start: t.start, end: t.end, role: t.role, needed });
+      }));
+      return rows;
+    }
+    function showTotal() {
+      const rows = planRows();
+      document.getElementById("planTotal").textContent =
+        `${rows.length} shifts, ${rows.reduce((a, r) => a + r.needed, 0)} workers to find.`;
+    }
+    async function sendPlan() {
+      const rows = planRows();
+      if (!rows.length) return showMsg("The plan is empty.");
+      if (!confirm(`Send this plan to the agent? It will start inviting workers for ` +
+                   `${rows.reduce((a, r) => a + r.needed, 0)} spots.`)) return;
+      try {
+        const r = await api("/api/plan", { rows });
+        showMsg(`Sent. ${r.spots} spot(s) opened. The agent is inviting workers now.`);
+        document.getElementById("day").innerHTML = "";
+        loadRota(); loadLog();
+      } catch (e) { showMsg(e.message); }
+    }
+    async function initPlanner() {
+      roles = await api("/api/roles");
+      document.getElementById("roleInfo").textContent =
+        "Workers: " + roles.map(r => `${r.workers} ${r.role}`).join(", ");
+      document.getElementById("planStart").value = new Date().toISOString().slice(0, 10);
+      document.getElementById("planStart").onchange = renderGrid;
+      renderTemplates();
+    }
+
     async function loadRota() {
       const day = document.getElementById("day").value;
       const data = await api("/api/rota" + (day ? "?day=" + day : ""));
       const daySel = document.getElementById("day");
-      if (!daySel.options.length)
+      if (daySel.options.length !== data.days.length)
         daySel.innerHTML = data.days.map(d => `<option ${d === data.day ? "selected" : ""}>${d}</option>`).join("");
+      if (!data.shifts.length) {
+        document.getElementById("rota").innerHTML =
+          '<div class="card muted">No shifts on this day yet. Plan the week above and send it to the agent.</div>';
+        return;
+      }
       document.getElementById("rota").innerHTML = data.shifts.map(s => {
         const open = s.open_spots.filter(o => o.status === "open").length;
         const unfilled = s.open_spots.filter(o => o.status === "unfilled").length;
         return `<div class="card">
-          <h2>${esc(s.name)} ${esc(s.start)}-${esc(s.end)}</h2>
+          <h2>${esc(s.name)} · ${esc(s.role)} ${esc(s.start)}-${esc(s.end)}</h2>
           <div class="row">
             <span class="pill working">${s.working} / ${s.needed} staffed</span>
             ${open ? `<span class="pill open">${open} open spot(s)</span>` : ""}
@@ -88,7 +199,7 @@
         `<div class="${r.kind}"><span class="muted">${r.time.slice(11)}</span> ${esc(r.text)}</div>`).join("");
       const offers = await api("/api/offers");
       document.getElementById("offers").innerHTML = offers.map(o =>
-        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.shift_name} ${o.start}-${o.end}</span>
+        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.date.slice(5)} ${o.shift_name} ${o.role} ${o.start}-${o.end}</span>
          <span class="pill ${o.status}">${o.status}${o.partly_until ? " until " + o.partly_until : ""}</span></div>`).join("")
         || '<span class="muted">None yet.</span>';
     }
@@ -121,6 +232,7 @@
     (async () => {
       const me = await api("/api/me");
       if (!me.is_manager) { location.href = "/static/staff.html"; return; }
+      await initPlanner();
       await loadRota(); loadLog(); loadSettings();
       setInterval(() => { loadRota(); loadLog(); }, 3000);   // live refresh
     })();
