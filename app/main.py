@@ -108,7 +108,7 @@ def me(worker_id: str = Cookie(None)):
 def my_shifts(worker_id: str = Cookie(None)):
     user = current_user(worker_id)
     return db.query(
-        """SELECT a.id, a.start, a.end, a.status, a.is_replacement, s.date, s.name AS shift_name
+        """SELECT a.id, a.start, a.end, a.status, a.is_replacement, s.date, s.name AS shift_name, s.role
            FROM assignments a JOIN shifts s ON s.id = a.shift_id
            WHERE a.worker_id = ? AND s.date >= ? ORDER BY s.date, a.start""",
         (user["id"], date.today().isoformat()),
@@ -130,7 +130,7 @@ def inbox(worker_id: str = Cookie(None)):
     user = current_user(worker_id)
     timeout = int(db.get_setting("offer_timeout_seconds"))
     rows = db.query(
-        """SELECT o.id, o.status, o.partly_until, o.sent_at, sp.start, sp.end, s.date, s.name AS shift_name
+        """SELECT o.id, o.status, o.partly_until, o.sent_at, sp.start, sp.end, s.date, s.name AS shift_name, s.role
            FROM offers o JOIN open_spots sp ON sp.id = o.spot_id JOIN shifts s ON s.id = sp.shift_id
            WHERE o.worker_id = ? ORDER BY o.id DESC LIMIT 20""",
         (user["id"],),
@@ -156,7 +156,7 @@ def answer(data: Answer, worker_id: str = Cookie(None)):
 def rota(day: str | None = None, worker_id: str = Cookie(None)):
     require_manager(worker_id)
     day = day or date.today().isoformat()
-    shifts = db.query("SELECT * FROM shifts WHERE date = ? ORDER BY start", (day,))
+    shifts = db.query("SELECT * FROM shifts WHERE date = ? ORDER BY start, role", (day,))
     for s in shifts:
         s["people"] = db.query(
             """SELECT a.id, w.name, a.start, a.end, a.status, a.is_replacement FROM assignments a
@@ -171,6 +171,34 @@ def rota(day: str | None = None, worker_id: str = Cookie(None)):
         )
     days = [r["date"] for r in db.query("SELECT DISTINCT date FROM shifts ORDER BY date")]
     return {"day": day, "days": days, "shifts": shifts}
+
+
+class PlanRow(BaseModel):
+    date: str          # 2026-11-21
+    name: str          # Morning
+    start: str         # 06:00
+    end: str           # 14:00
+    role: str          # Cashier
+    needed: int
+
+
+class Plan(BaseModel):
+    rows: list[PlanRow]
+
+
+@app.get("/api/roles")
+def roles(worker_id: str = Cookie(None)):
+    require_manager(worker_id)
+    return db.query("SELECT role, COUNT(*) AS workers FROM workers WHERE is_manager = 0 GROUP BY role ORDER BY role")
+
+
+@app.post("/api/plan")
+def send_plan(data: Plan, worker_id: str = Cookie(None)):
+    """The manager's 7-day staffing request. Only now does the agent start inviting workers."""
+    require_manager(worker_id)
+    if not data.rows:
+        raise HTTPException(400, "The plan is empty")
+    return engine.create_plan([r.model_dump() for r in data.rows])
 
 
 class Needed(BaseModel):
@@ -194,7 +222,8 @@ def decision_log(worker_id: str = Cookie(None)):
 def all_offers(worker_id: str = Cookie(None)):
     require_manager(worker_id)
     return db.query(
-        """SELECT o.id, w.name, o.wave, o.status, o.partly_until, o.sent_at, sp.start, sp.end, s.name AS shift_name
+        """SELECT o.id, w.name, o.wave, o.status, o.partly_until, o.sent_at, sp.start, sp.end, s.name AS shift_name,
+                  s.date, s.role
            FROM offers o JOIN workers w ON w.id = o.worker_id JOIN open_spots sp ON sp.id = o.spot_id
            JOIN shifts s ON s.id = sp.shift_id ORDER BY o.id DESC LIMIT 60"""
     )

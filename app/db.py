@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS workers (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     pin TEXT NOT NULL,
+    role TEXT,                              -- Cashier / Stock (NULL for the manager)
     is_manager INTEGER NOT NULL DEFAULT 0,
     is_demo INTEGER NOT NULL DEFAULT 0      -- 1 = a real person uses this login in the demo (never auto-answered)
 );
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS shifts (
     name TEXT NOT NULL,                     -- Morning / Evening
     start TEXT NOT NULL,                    -- 14:00
     end TEXT NOT NULL,                      -- 22:00
+    role TEXT NOT NULL DEFAULT 'Any',       -- which role this shift needs (Cashier / Stock)
     needed INTEGER NOT NULL
 );
 
@@ -39,7 +41,7 @@ CREATE TABLE IF NOT EXISTS open_spots (
     shift_id INTEGER NOT NULL,
     start TEXT NOT NULL,
     end TEXT NOT NULL,
-    reason TEXT NOT NULL,                   -- sick / surge / partly
+    reason TEXT NOT NULL,                   -- plan / sick / surge / partly
     status TEXT NOT NULL DEFAULT 'open',    -- open / filled / unfilled / cancelled
     filled_by INTEGER,
     created_at TEXT NOT NULL

@@ -12,14 +12,19 @@ Track 1: Autonomous Agents & Intelligent Systems.
 
 ## What it does (nothing more)
 
-1. **Sick call**: a worker taps "Report sick". 1 spot opens. The agent asks
+1. **7-day plan**: the manager sets the shifts for the next 7 days (dates, hours,
+   role, number of workers per shift) and presses **Send to agent**. Only then does
+   the agent start inviting workers: the right role, one shift per day per person,
+   fewest hours first. It keeps going in waves until every shift is full.
+2. **Sick call**: a worker taps "Report sick". 1 spot opens. The agent asks
    available workers one at a time until someone says Yes.
-2. **Demand surge**: the manager changes "needed" (for example 15 to 20). 5 spots
+3. **Demand surge**: the manager changes "needed" (for example 15 to 20). 5 spots
    open. The agent invites people in waves and stops when full. No overbooking.
-3. **Monthly pay**: "Close day" saves the day's shifts. The monthly report shows
+4. **Monthly pay**: "Close day" saves the day's shifts. The monthly report shows
    hours x one hourly rate = gross pay, with CSV export. Sick = 0 hours.
 
-"Available" only means "not already on that shift". No skills, licences or other rules.
+"Available" means: has the shift's role, is not already working that day, and has no
+other invitation waiting for that day. No skills, licences or other rules.
 
 ## Setup (once)
 
@@ -58,23 +63,23 @@ Open http://localhost:8000 on the laptop. On a phone on the same Wi-Fi, open
 | Name | PIN | Role |
 |---|---|---|
 | Manager | 0000 | Manager dashboard |
-| Eva Horvath | 5555 | Works today's evening shift: use her to **Report sick** |
-| Anna Kovacs | 1111 | Few hours this month, so the agent asks her first |
-| Bence Nagy | 2222 | 2nd in line |
-| Csilla Toth | 3333 | 3rd in line |
-| David Szabo | 4444 | 4th in line |
+| Anna Kovacs | 1111 | Cashier. Few hours this month, so the agent asks her first |
+| Bence Nagy | 2222 | Cashier, 2nd in line |
+| Csilla Toth | 3333 | Cashier, 3rd in line |
+| David Szabo | 4444 | Stock. Asked first for Stock shifts |
+| Eva Horvath | 5555 | Cashier, 4th in line |
 | Everyone else | 1234 | Fake workers. If "Fake workers answer by themselves" is on, they answer automatically |
 
 ## Demo script (about 3 minutes)
 
 1. Manager page: set **Answer timeout** to 20 seconds (speeds up the demo).
-2. Eva taps **Report sick** on today's evening shift. Manager page shows 1 open spot
-   and the agent's reason.
-3. Anna's phone gets the offer and taps **No**. The agent moves on by itself to Bence.
-4. Bence taps **Partly**, until 21:00. The spot is split; the agent asks Csilla for
-   21:00-22:00. Csilla taps **Yes**. Rota updated, manager notified.
-5. Manager changes Evening "Needed" from 15 to 20. The agent sends a wave. When all
-   are filled, a late Yes gets "Already filled, thanks": no overbooking.
+2. **Plan the next 7 days**: keep the 4 default shifts (Morning/Evening x Cashier/Stock),
+   raise Saturday's numbers, press **Send to agent**. The log shows the staffing request
+   and the first invitation waves. Fake workers start answering by themselves.
+3. Anna's phone gets an offer and taps **Yes**. She is booked; the rota updates.
+4. Bence taps **Partly**, until 10:00. The spot is split; the agent asks the next person
+   for the rest.
+5. Anna taps **Report sick** on her new shift. The agent finds a replacement.
 6. **Close day**, open **Monthly report**, **Download CSV**.
 
 Use **Reset demo data** on the manager page before the real pitch.

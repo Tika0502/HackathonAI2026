@@ -29,7 +29,7 @@
       const rows = await api("/api/my-shifts");
       document.getElementById("shifts").innerHTML = rows.length ? rows.map(s => `
         <div class="row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee">
-          <div><b>${esc(s.date)}</b> ${esc(s.shift_name)} ${esc(s.start)}-${esc(s.end)}
+          <div><b>${esc(s.date)}</b> ${esc(s.shift_name)} (${esc(s.role)}) ${esc(s.start)}-${esc(s.end)}
             ${s.is_replacement ? '<span class="pill">cover</span>' : ""}
             <span class="pill ${s.status}">${s.status}</span></div>
           ${s.status === "working" ? `<button class="no" onclick="reportSick(${s.id})">Report sick</button>` : ""}
@@ -53,7 +53,7 @@
         if (isNew && !firstLoad && o.status === "waiting") notify(o);
         if (o.status === "waiting") return `
           <div class="offer">
-            <b>Can you cover ${esc(o.shift_name)} on ${esc(o.date)}, ${esc(o.start)}-${esc(o.end)}?</b>
+            <b>Can you work ${esc(o.shift_name)} (${esc(o.role)}) on ${esc(o.date)}, ${esc(o.start)}-${esc(o.end)}?</b>
             <p class="muted">Please answer within ${data.timeout_seconds} seconds.</p>
             <div class="row">
               <button class="yes" onclick="answer(${o.id}, 'yes')">Yes</button>

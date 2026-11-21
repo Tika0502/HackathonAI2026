@@ -54,7 +54,48 @@ def worker_name(worker_id):
 
 def shift_label(shift_id):
     s = db.query_one("SELECT * FROM shifts WHERE id = ?", (shift_id,))
-    return f"{s['date']} {s['name']} {s['start']}-{s['end']}"
+    return f"{s['date']} {s['name']} {s['role']} {s['start']}-{s['end']}"
+
+
+# ------------------------------------------------------------ the plan ---
+
+def create_plan(rows):
+    """Manager sends a 7-day staffing request to the agent.
+
+    rows = [{date, name, start, end, role, needed}, ...]
+    A new shift is created with `needed` open spots (nobody is booked yet).
+    If the same shift (date + name + role) already exists, its number is changed
+    instead, like a demand surge. Then the agent is woken up to invite workers.
+    """
+    created, changed, spots = 0, 0, 0
+    for r in rows:
+        needed = int(r["needed"])
+        if needed <= 0:
+            continue
+        old = db.query_one(
+            "SELECT id FROM shifts WHERE date = ? AND name = ? AND role = ?", (r["date"], r["name"], r["role"])
+        )
+        if old:
+            spots += set_needed(old["id"], needed, quiet=True).get("opened", 0)
+            changed += 1
+            continue
+        shift_id = db.execute(
+            "INSERT INTO shifts(date, name, start, end, role, needed) VALUES (?, ?, ?, ?, ?, ?)",
+            (r["date"], r["name"], r["start"], r["end"], r["role"], needed),
+        )
+        for _ in range(needed):
+            db.execute(
+                "INSERT INTO open_spots(shift_id, start, end, reason, created_at) VALUES (?, ?, ?, 'plan', ?)",
+                (shift_id, r["start"], r["end"], now_str()),
+            )
+        created += 1
+        spots += needed
+    if spots:
+        dates = sorted({r["date"] for r in rows})
+        log(f"Staffing request from the manager: {created + changed} shift(s), {dates[0]} to {dates[-1]}, "
+            f"{spots} worker(s) to find. Agent is starting.", kind="manager")
+        wake_agent()
+    return {"ok": True, "shifts": created + changed, "spots": spots}
 
 
 # ---------------------------------------------------------------- events ---
@@ -97,7 +138,7 @@ def count_slots(shift_id):
     return working, open_
 
 
-def set_needed(shift_id, new_needed):
+def set_needed(shift_id, new_needed, quiet=False):
     """Manager changes the number needed (demand surge)."""
     shift = db.query_one("SELECT * FROM shifts WHERE id = ?", (shift_id,))
     if not shift:
@@ -113,8 +154,9 @@ def set_needed(shift_id, new_needed):
                 "INSERT INTO open_spots(shift_id, start, end, reason, created_at) VALUES (?, ?, ?, 'surge', ?)",
                 (shift_id, shift["start"], shift["end"], now_str()),
             )
-        log(f"Manager changed {shift_label(shift_id)} from {old} to {new_needed} people. "
-            f"{missing} spot(s) opened.", kind="system")
+        if not quiet:
+            log(f"Manager changed {shift_label(shift_id)} from {old} to {new_needed} people. "
+                f"{missing} spot(s) opened.", kind="system")
         wake_agent()
     elif missing < 0:
         # Fewer people needed: cancel open surge spots (never remove people already booked).
@@ -134,25 +176,35 @@ def set_needed(shift_id, new_needed):
 # ---------------------------------------------------------------- offers ---
 
 def available_workers(spot_id):
-    """Who could take this spot: not already on that shift, not already asked
-    for that shift. Sorted by fewest hours this month (fairness)."""
-    spot = db.query_one("SELECT * FROM open_spots WHERE id = ?", (spot_id,))
+    """Who could take this spot: has the shift's role, not already on that shift,
+    not already asked for that shift, not working another shift that day and no
+    other invitation waiting for that day (one shift per day).
+    Sorted by fewest hours this month (fairness)."""
+    spot = db.query_one(
+        "SELECT sp.*, s.role, s.date FROM open_spots sp JOIN shifts s ON s.id = sp.shift_id WHERE sp.id = ?",
+        (spot_id,),
+    )
     if not spot:
         return []
     month = now().strftime("%Y-%m")
     return db.query(
         """
-        SELECT w.id, w.name,
+        SELECT w.id, w.name, w.role,
                COALESCE((SELECT SUM(hours) FROM shift_records r
                          WHERE r.worker_id = w.id AND substr(r.date, 1, 7) = ?), 0) AS hours_this_month
         FROM workers w
         WHERE w.is_manager = 0
+          AND (? = 'Any' OR w.role = ?)
           AND w.id NOT IN (SELECT worker_id FROM assignments WHERE shift_id = ?)
           AND w.id NOT IN (SELECT o.worker_id FROM offers o JOIN open_spots s ON s.id = o.spot_id
                            WHERE s.shift_id = ?)
+          AND w.id NOT IN (SELECT a.worker_id FROM assignments a JOIN shifts s ON s.id = a.shift_id
+                           WHERE s.date = ? AND a.status = 'working')
+          AND w.id NOT IN (SELECT o.worker_id FROM offers o JOIN open_spots sp ON sp.id = o.spot_id
+                           JOIN shifts s ON s.id = sp.shift_id WHERE s.date = ? AND o.status = 'waiting')
         ORDER BY hours_this_month ASC, w.name ASC
         """,
-        (month, spot["shift_id"], spot["shift_id"]),
+        (month, spot["role"], spot["role"], spot["shift_id"], spot["shift_id"], spot["date"], spot["date"]),
     )
 
 
@@ -169,6 +221,7 @@ def open_needs():
     )
     for r in rows:
         r["shift"] = shift_label(r["shift_id"])
+        r["role"] = db.query_one("SELECT role FROM shifts WHERE id = ?", (r["shift_id"],))["role"]
         r["waiting_offers"] = db.query_one(
             """SELECT COUNT(*) AS n FROM offers o JOIN open_spots s ON s.id = o.spot_id
                WHERE o.status = 'waiting' AND s.shift_id = ? AND s.start = ? AND s.end = ?""",
@@ -266,6 +319,18 @@ def answer_offer(offer_id, worker_id, answer, until=None):
             log(f"{worker_name(worker_id)} said Yes, but the spot was already filled. "
                 f"Told them: already filled, thanks.", spot["id"], kind="system")
             return {"ok": True, "message": "Already filled, thanks anyway!"}
+
+        busy = conn.execute(
+            """SELECT 1 FROM assignments a JOIN shifts s ON s.id = a.shift_id
+               WHERE a.worker_id = ? AND a.status = 'working'
+                 AND s.date = (SELECT date FROM shifts WHERE id = ?)""",
+            (worker_id, target["shift_id"]),
+        ).fetchone()
+        if busy:
+            conn.execute("UPDATE offers SET status = 'no', answered_at = ? WHERE id = ?", (t, offer_id))
+            conn.execute("COMMIT")
+            wake_agent()
+            return {"ok": True, "message": "You already work a shift that day, so we asked someone else."}
 
         end = target["end"]
         if answer == "partly":
