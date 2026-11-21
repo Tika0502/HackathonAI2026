@@ -30,3 +30,12 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
 .offer { border: 2px solid #bbdefb; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
 .msg { padding: 10px; border-radius: 8px; background: #e8f5e9; margin-bottom: 10px; display: none; }
 .pill.removed, .pill.cancelled { background: #e0e0e0; }
+/* Manager page: collapsible, draggable panels */
+details.panel > summary { font-weight: 600; font-size: 16px; cursor: grab; list-style: none; }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary::after { content: " \25BE"; color: #6b7280; }
+details.panel:not([open]) > summary::after { content: " \25B8"; }
+details.panel .handle { color: #9aa1ad; margin-right: 6px; }
+details.panel.dragging { opacity: .5; }
+.shiftbox { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.shiftbox h2 { font-size: 15px; margin: 0 0 8px; }

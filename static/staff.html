@@ -33,7 +33,7 @@
           <div><b>${esc(s.date)}</b> ${esc(s.shift_name)} ${esc(s.start)}-${esc(s.end)}
             ${s.is_replacement ? '<span class="pill">cover</span>' : ""}
             <span class="pill ${s.status}">${s.status}</span></div>
-          ${s.status === "working" ? `<button class="no" onclick="reportSick(${s.id})">Report sick</button>` : ""}
+          ${s.status === "working" ? `<button class="no" onclick="reportSick(${s.id})">Report sick / can't come</button>` : ""}
         </div>`).join("") : "No upcoming shifts.";
     }
 

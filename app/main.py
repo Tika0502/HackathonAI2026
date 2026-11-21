@@ -211,6 +211,17 @@ def change_needed(data: Needed, worker_id: str = Cookie(None)):
     return engine.set_needed(data.shift_id, data.needed)
 
 
+@app.post("/api/mark-sick")
+def mark_sick(data: Sick, worker_id: str = Cookie(None)):
+    """Manager marks someone sick / absent (e.g. they phoned in). Same as the
+    worker pressing "Report sick": 1 spot opens and the agent finds a replacement."""
+    require_manager(worker_id)
+    a = db.query_one("SELECT worker_id FROM assignments WHERE id = ?", (data.assignment_id,))
+    if not a:
+        raise HTTPException(404, "Booking not found")
+    return engine.report_sick(a["worker_id"], data.assignment_id)
+
+
 @app.get("/api/log")
 def decision_log(worker_id: str = Cookie(None)):
     require_manager(worker_id)
