@@ -152,7 +152,8 @@
                    `${rows.reduce((a, r) => a + r.needed, 0)} spots.`)) return;
       try {
         const r = await api("/api/plan", { rows });
-        showMsg(`Sent. ${r.spots} spot(s) opened. The agent is inviting workers now.`);
+        showMsg(`Sent. ${r.spots} spot(s) opened. The agent is inviting workers now.` +
+                (r.skipped ? ` ${r.skipped} shift(s) were already over and were skipped.` : ""));
         document.getElementById("day").innerHTML = "";
         loadRota(); loadLog();
       } catch (e) { showMsg(e.message); }

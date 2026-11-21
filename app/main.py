@@ -148,6 +148,11 @@ def inbox(worker_id: str = Cookie(None)):
     )
     messages = db.query("SELECT id, time, text FROM messages WHERE worker_id = ? ORDER BY id DESC LIMIT 10",
                         (user["id"],))
+    # Real time left to answer (already divided by the demo speed), so the phone shows the truth.
+    limit = engine.timeout_seconds()
+    for o in rows:
+        if o["status"] == "waiting":
+            o["seconds_left"] = max(int(limit - engine.age_seconds(o["sent_at"])), 0)
     return {"timeout_minutes": db.get_setting("offer_timeout_minutes"), "offers": rows, "messages": messages}
 
 
@@ -275,6 +280,8 @@ class Day(BaseModel):
 @app.post("/api/close-day")
 def close_day(data: Day, worker_id: str = Cookie(None)):
     require_manager(worker_id)
+    if data.day > date.today().isoformat():
+        raise HTTPException(400, "You can only close today or a past day.")
     return engine.close_day(data.day)
 
 

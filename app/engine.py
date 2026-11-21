@@ -55,6 +55,16 @@ def age_seconds(sent_at):
     return (now() - datetime.strptime(sent_at, "%Y-%m-%d %H:%M:%S")).total_seconds()
 
 
+def has_ended(day, start, end):
+    """True if the shift on `day` from `start` to `end` is already over
+    (a shift ending at or before its start time ends the next day)."""
+    s = datetime.strptime(f"{day} {start}", "%Y-%m-%d %H:%M")
+    e = datetime.strptime(f"{day} {end}", "%Y-%m-%d %H:%M")
+    if e <= s:
+        e += timedelta(days=1)
+    return e <= now()
+
+
 def hours_between(start, end):
     s = datetime.strptime(start, "%H:%M")
     e = datetime.strptime(end, "%H:%M")
@@ -95,10 +105,13 @@ def create_plan(rows):
     If the same shift (date + name) already exists, its number is changed
     instead. Then the agent is woken up to invite workers.
     """
-    created, changed, spots = 0, 0, 0
+    created, changed, spots, skipped = 0, 0, 0, 0
     for r in rows:
         needed = int(r["needed"])
         if needed <= 0:
+            continue
+        if has_ended(r["date"], r["start"], r["end"]):   # never invite people to a shift that is over
+            skipped += 1
             continue
         old = db.query_one("SELECT id FROM shifts WHERE date = ? AND name = ?", (r["date"], r["name"]))
         if old:
@@ -121,7 +134,9 @@ def create_plan(rows):
         log(f"Staffing request from the manager: {created + changed} shift(s), {dates[0]} to {dates[-1]}, "
             f"{spots} worker(s) to find. Agent is starting.", kind="manager")
         wake_agent()
-    return {"ok": True, "shifts": created + changed, "spots": spots}
+    if skipped:
+        log(f"{skipped} shift(s) in the plan were already over, so they were skipped.", kind="system")
+    return {"ok": True, "shifts": created + changed, "spots": spots, "skipped": skipped}
 
 
 # ---------------------------------------------------------------- events ---
@@ -257,7 +272,7 @@ def available_workers(spot_id, strict=True):
           AND w.id NOT IN (SELECT o.worker_id FROM offers o JOIN open_spots s ON s.id = o.spot_id
                            WHERE s.shift_id = ?)
           AND w.id NOT IN (SELECT a.worker_id FROM assignments a JOIN shifts s ON s.id = a.shift_id
-                           WHERE s.date = ? AND a.status = 'working')
+                           WHERE s.date = ? AND a.status IN ('working', 'sick'))
           {busy}
         ORDER BY hours_this_month ASC, w.name ASC
         """,
@@ -292,6 +307,12 @@ def open_needs():
         """SELECT shift_id, MIN(id) AS spot_id, COUNT(*) AS open_count, GROUP_CONCAT(DISTINCT reason) AS reasons
            FROM open_spots WHERE status = 'open' GROUP BY shift_id ORDER BY MIN(id)"""
     )
+    # Shifts that are already over are left out: nobody is invited to them any more.
+    # (A shift in progress is still filled, e.g. someone went home sick.)
+    shifts = {s["id"]: s for s in db.query("SELECT id, date, start, end FROM shifts")}
+    rows = [r for r in rows
+            if not has_ended(shifts[r["shift_id"]]["date"], shifts[r["shift_id"]]["start"],
+                             shifts[r["shift_id"]]["end"])]
     esc = escalate_seconds()
     for r in rows:
         r["shift"] = shift_label(r["shift_id"])
@@ -410,6 +431,12 @@ def answer_offer(offer_id, worker_id, answer):
             "SELECT * FROM open_spots WHERE shift_id = ? AND status = 'open' ORDER BY id LIMIT 1",
             (spot["shift_id"],),
         ).fetchone()
+        sh = conn.execute("SELECT date, start, end FROM shifts WHERE id = ?", (spot["shift_id"],)).fetchone()
+        if has_ended(sh["date"], sh["start"], sh["end"]):
+            conn.execute("UPDATE offers SET status = 'too_late', answered_at = ? WHERE id = ?", (t, offer_id))
+            conn.execute("COMMIT")
+            return {"ok": True, "message": "This shift is already over. Thanks anyway!"}
+
         if not target:
             conn.execute("UPDATE offers SET status = 'too_late', answered_at = ? WHERE id = ?", (t, offer_id))
             conn.execute("COMMIT")
@@ -418,7 +445,7 @@ def answer_offer(offer_id, worker_id, answer):
 
         busy = conn.execute(
             """SELECT 1 FROM assignments a JOIN shifts s ON s.id = a.shift_id
-               WHERE a.worker_id = ? AND a.status = 'working'
+               WHERE a.worker_id = ? AND a.status IN ('working', 'sick')
                  AND s.date = (SELECT date FROM shifts WHERE id = ?)""",
             (worker_id, target["shift_id"]),
         ).fetchone()
