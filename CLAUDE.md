@@ -17,7 +17,6 @@
 
 ## Our project
 - **Track:** 1, Autonomous Agents & Intelligent Systems (chosen by the team).
-- **Research:** see `research/problem-research.md`.
 <!-- TODO: target user, problem, core demo flow, stack, run commands, team split -->
 
 ---

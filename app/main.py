@@ -23,15 +23,21 @@ from . import agent, db, engine  # noqa: E402
 STATIC = Path(__file__).resolve().parent.parent / "static"
 
 
+AGENT_MIN_GAP_SECONDS = 3   # run the agent at most every 3 s; events in between are handled together
+
+
 async def background_loop():
-    """Every second: time out old offers, let fake workers answer, and run the
-    agent if something happened."""
+    """Every second: expire/escalate old offers, let fake workers answer, and run
+    the agent if something happened (batched, at most every few seconds)."""
+    last_run = 0.0
+    loop = asyncio.get_running_loop()
     while True:
         try:
             engine.process_timeouts()
             engine.bots_tick()
-            if engine.state["needs_agent_run"]:
+            if engine.state["needs_agent_run"] and loop.time() - last_run >= AGENT_MIN_GAP_SECONDS:
                 engine.state["needs_agent_run"] = False
+                last_run = loop.time()
                 await agent.run_filler()
         except Exception as e:
             print("background loop error:", e)
@@ -108,7 +114,7 @@ def me(worker_id: str = Cookie(None)):
 def my_shifts(worker_id: str = Cookie(None)):
     user = current_user(worker_id)
     return db.query(
-        """SELECT a.id, a.start, a.end, a.status, a.is_replacement, s.date, s.name AS shift_name, s.role
+        """SELECT a.id, a.start, a.end, a.status, a.is_replacement, s.date, s.name AS shift_name
            FROM assignments a JOIN shifts s ON s.id = a.shift_id
            WHERE a.worker_id = ? AND s.date >= ? ORDER BY s.date, a.start""",
         (user["id"], date.today().isoformat()),
@@ -128,26 +134,26 @@ def report_sick(data: Sick, worker_id: str = Cookie(None)):
 @app.get("/api/inbox")
 def inbox(worker_id: str = Cookie(None)):
     user = current_user(worker_id)
-    timeout = int(db.get_setting("offer_timeout_seconds"))
     rows = db.query(
-        """SELECT o.id, o.status, o.partly_until, o.sent_at, sp.start, sp.end, s.date, s.name AS shift_name, s.role
+        """SELECT o.id, o.status, o.sent_at, sp.start, sp.end, s.date, s.name AS shift_name
            FROM offers o JOIN open_spots sp ON sp.id = o.spot_id JOIN shifts s ON s.id = sp.shift_id
            WHERE o.worker_id = ? ORDER BY o.id DESC LIMIT 20""",
         (user["id"],),
     )
-    return {"timeout_seconds": timeout, "offers": rows}
+    messages = db.query("SELECT id, time, text FROM messages WHERE worker_id = ? ORDER BY id DESC LIMIT 10",
+                        (user["id"],))
+    return {"timeout_minutes": db.get_setting("offer_timeout_minutes"), "offers": rows, "messages": messages}
 
 
 class Answer(BaseModel):
     offer_id: int
-    answer: str            # yes / no / partly
-    until: str | None = None
+    answer: str            # yes (Accept) / no (Decline)
 
 
 @app.post("/api/answer")
 def answer(data: Answer, worker_id: str = Cookie(None)):
     user = current_user(worker_id)
-    return engine.answer_offer(data.offer_id, user["id"], data.answer, data.until)
+    return engine.answer_offer(data.offer_id, user["id"], data.answer)
 
 
 # ----------------------------------------------------------- manager ---
@@ -156,11 +162,11 @@ def answer(data: Answer, worker_id: str = Cookie(None)):
 def rota(day: str | None = None, worker_id: str = Cookie(None)):
     require_manager(worker_id)
     day = day or date.today().isoformat()
-    shifts = db.query("SELECT * FROM shifts WHERE date = ? ORDER BY start, role", (day,))
+    shifts = db.query("SELECT * FROM shifts WHERE date = ? ORDER BY start", (day,))
     for s in shifts:
         s["people"] = db.query(
             """SELECT a.id, w.name, a.start, a.end, a.status, a.is_replacement FROM assignments a
-               JOIN workers w ON w.id = a.worker_id WHERE a.shift_id = ? ORDER BY a.status DESC, w.name""",
+               JOIN workers w ON w.id = a.worker_id WHERE a.shift_id = ? ORDER BY a.status = 'working' DESC, w.name""",
             (s["id"],),
         )
         working, _ = engine.count_slots(s["id"])
@@ -178,18 +184,11 @@ class PlanRow(BaseModel):
     name: str          # Morning
     start: str         # 06:00
     end: str           # 14:00
-    role: str          # Cashier
     needed: int
 
 
 class Plan(BaseModel):
     rows: list[PlanRow]
-
-
-@app.get("/api/roles")
-def roles(worker_id: str = Cookie(None)):
-    require_manager(worker_id)
-    return db.query("SELECT role, COUNT(*) AS workers FROM workers WHERE is_manager = 0 GROUP BY role ORDER BY role")
 
 
 @app.post("/api/plan")
@@ -222,8 +221,7 @@ def decision_log(worker_id: str = Cookie(None)):
 def all_offers(worker_id: str = Cookie(None)):
     require_manager(worker_id)
     return db.query(
-        """SELECT o.id, w.name, o.wave, o.status, o.partly_until, o.sent_at, sp.start, sp.end, s.name AS shift_name,
-                  s.date, s.role
+        """SELECT o.id, w.name, o.wave, o.status, o.sent_at, sp.start, sp.end, s.name AS shift_name, s.date
            FROM offers o JOIN workers w ON w.id = o.worker_id JOIN open_spots sp ON sp.id = o.spot_id
            JOIN shifts s ON s.id = sp.shift_id ORDER BY o.id DESC LIMIT 60"""
     )
@@ -247,6 +245,8 @@ def save_setting(data: Setting, worker_id: str = Cookie(None)):
     require_manager(worker_id)
     if data.key not in db.DEFAULT_SETTINGS:
         raise HTTPException(400, "Unknown setting")
+    if data.key == "offer_timeout_minutes" and data.value not in ("3", "5"):
+        raise HTTPException(400, "Timeout must be 3 or 5 minutes")
     db.set_setting(data.key, data.value)
     return {"ok": True}
 
@@ -266,6 +266,7 @@ def reset(worker_id: str = Cookie(None)):
     require_manager(worker_id)
     from .seed import seed
     seed()
+    engine.state["escalated"].clear()
     return {"ok": True}
 
 

@@ -15,10 +15,9 @@
 
     <div class="card" id="planner">
       <h2>1. Plan the next 7 days</h2>
-      <p class="muted">Set the shifts and how many people each role needs. Nobody is contacted until you press
+      <p class="muted">Set the shifts and how many people each one needs. Nobody is contacted until you press
         <b>Send to agent</b>.</p>
-      <div class="row">Start date: <input id="planStart" type="date">
-        <span id="roleInfo" class="muted"></span></div>
+      <div class="row">Start date: <input id="planStart" type="date"></div>
       <div style="overflow-x:auto"><table id="templates"></table></div>
       <p class="row"><button class="light" onclick="addTemplate()">+ Add shift</button></p>
       <h2>2. Workers needed per day</h2>
@@ -50,8 +49,14 @@
         </div>
         <div class="card">
           <h2>Demo settings</h2>
-          <div class="row">Answer timeout (seconds):
-            <input id="timeout" type="number" style="width:90px"><button class="light" onclick="saveSetting('offer_timeout_seconds', timeout.value)">Save</button></div>
+          <div class="row">Time to answer:
+            <select id="timeout" onchange="saveSetting('offer_timeout_minutes', this.value)">
+              <option value="3">3 minutes (default)</option><option value="5">5 minutes</option></select></div>
+          <p class="muted">No answer after 2 minutes: the next person is asked too. First to accept gets the shift.</p>
+          <div class="row">Demo speed:
+            <select id="demo_speed" onchange="saveSetting('demo_speed', this.value)">
+              <option value="1">Real time</option><option value="10">10x faster (3 min = 18 s)</option>
+              <option value="30">30x faster (3 min = 6 s)</option></select></div>
           <p class="row"><label><input type="checkbox" id="use_ai" onchange="saveSetting('use_ai', this.checked ? 1 : 0)"> Use AI agent (off = plain rules)</label></p>
           <p class="row"><label><input type="checkbox" id="bots_on" onchange="saveSetting('bots_on', this.checked ? 1 : 0)"> Fake workers answer by themselves</label></p>
           <button class="no" onclick="resetDemo()">Reset demo data</button>
@@ -64,12 +69,9 @@
     let openShift = null;   // which shift's people list is expanded
 
     // ---------------------------------------------------------- planner ---
-    let roles = [];
     let templates = [
-      { name: "Morning", start: "06:00", end: "14:00", role: "Cashier", needed: 3 },
-      { name: "Morning", start: "06:00", end: "14:00", role: "Stock", needed: 2 },
-      { name: "Evening", start: "14:00", end: "22:00", role: "Cashier", needed: 3 },
-      { name: "Evening", start: "14:00", end: "22:00", role: "Stock", needed: 2 },
+      { name: "Morning", start: "06:00", end: "14:00", needed: 3 },
+      { name: "Evening", start: "14:00", end: "22:00", needed: 3 },
     ];
     let counts = {};   // "templateIndex|date" -> number
 
@@ -86,14 +88,12 @@
     }
 
     function renderTemplates() {
-      const roleOpts = r => roles.map(x => `<option ${x.role === r ? "selected" : ""}>${esc(x.role)}</option>`).join("");
       document.getElementById("templates").innerHTML =
-        `<tr><th>Shift</th><th>Start</th><th>End</th><th>Role</th><th>People</th><th></th></tr>` +
+        `<tr><th>Shift</th><th>Start</th><th>End</th><th>People</th><th></th></tr>` +
         templates.map((t, i) => `<tr>
           <td><input value="${esc(t.name)}" style="width:110px" onchange="setT(${i}, 'name', this.value)"></td>
           <td><input type="time" value="${t.start}" onchange="setT(${i}, 'start', this.value)"></td>
           <td><input type="time" value="${t.end}" onchange="setT(${i}, 'end', this.value)"></td>
-          <td><select onchange="setT(${i}, 'role', this.value)">${roleOpts(t.role)}</select></td>
           <td><input type="number" min="0" value="${t.needed}" style="width:70px" onchange="setT(${i}, 'needed', +this.value, true)"></td>
           <td><button class="light" onclick="removeTemplate(${i})">Remove</button></td></tr>`).join("");
       renderGrid();
@@ -104,7 +104,7 @@
       renderGrid();
     }
     function addTemplate() {
-      templates.push({ name: "Night", start: "22:00", end: "06:00", role: roles[0]?.role || "Cashier", needed: 1 });
+      templates.push({ name: "Night", start: "22:00", end: "06:00", needed: 1 });
       counts = {}; renderTemplates();
     }
     function removeTemplate(i) { templates.splice(i, 1); counts = {}; renderTemplates(); }
@@ -114,7 +114,7 @@
       const dates = planDates();
       document.getElementById("grid").innerHTML =
         `<tr><th>Shift</th>${dates.map(d => `<th>${dayLabel(d)}</th>`).join("")}</tr>` +
-        templates.map((t, i) => `<tr><td>${esc(t.name)} ${esc(t.role)}<br><span class="muted">${t.start}-${t.end}</span></td>` +
+        templates.map((t, i) => `<tr><td>${esc(t.name)}<br><span class="muted">${t.start}-${t.end}</span></td>` +
           dates.map(d => `<td><input type="number" min="0" value="${countFor(i, d)}" style="width:60px"
             onchange="counts['${i}|${d}'] = +this.value; showTotal()"></td>`).join("") + `</tr>`).join("");
       showTotal();
@@ -123,7 +123,7 @@
       const rows = [];
       planDates().forEach(d => templates.forEach((t, i) => {
         const needed = countFor(i, d);
-        if (needed > 0) rows.push({ date: d, name: t.name, start: t.start, end: t.end, role: t.role, needed });
+        if (needed > 0) rows.push({ date: d, name: t.name, start: t.start, end: t.end, needed });
       }));
       return rows;
     }
@@ -145,9 +145,6 @@
       } catch (e) { showMsg(e.message); }
     }
     async function initPlanner() {
-      roles = await api("/api/roles");
-      document.getElementById("roleInfo").textContent =
-        "Workers: " + roles.map(r => `${r.workers} ${r.role}`).join(", ");
       document.getElementById("planStart").value = new Date().toISOString().slice(0, 10);
       document.getElementById("planStart").onchange = renderGrid;
       renderTemplates();
@@ -168,14 +165,14 @@
         const open = s.open_spots.filter(o => o.status === "open").length;
         const unfilled = s.open_spots.filter(o => o.status === "unfilled").length;
         return `<div class="card">
-          <h2>${esc(s.name)} · ${esc(s.role)} ${esc(s.start)}-${esc(s.end)}</h2>
+          <h2>${esc(s.name)} ${esc(s.start)}-${esc(s.end)}</h2>
           <div class="row">
             <span class="pill working">${s.working} / ${s.needed} staffed</span>
             ${open ? `<span class="pill open">${open} open spot(s)</span>` : ""}
             ${unfilled ? `<span class="pill unfilled">${unfilled} unfilled</span>` : ""}
           </div>
           <p class="row">Needed: <input id="need${s.id}" type="number" value="${s.needed}" style="width:80px">
-            <button onclick="changeNeeded(${s.id})">Update</button>
+            <button onclick="changeNeeded(${s.id}, ${s.working})">Update</button>
             <button class="light" onclick="toggle(${s.id})">${openShift === s.id ? "Hide" : "Show"} people</button></p>
           ${s.open_spots.map(o => `<div class="muted">Spot ${o.start}-${o.end} (${o.reason}) <span class="pill ${o.status}">${o.status}</span></div>`).join("")}
           ${openShift === s.id ? `<table><tr><th>Name</th><th>Time</th><th>Status</th></tr>${s.people.map(p => `
@@ -187,9 +184,13 @@
 
     function toggle(id) { openShift = openShift === id ? null : id; loadRota(); }
 
-    async function changeNeeded(id) {
-      const r = await api("/api/needed", { shift_id: id, needed: +document.getElementById("need" + id).value });
-      showMsg(r.opened ? `${r.opened} spot(s) opened. The agent is inviting people.` : "Saved.");
+    async function changeNeeded(id, working) {
+      const needed = +document.getElementById("need" + id).value;
+      if (needed < working && !confirm(`Only ${needed} needed but ${working} are booked. ` +
+          `The most recently booked people will be removed and get a message. Continue?`)) return;
+      const r = await api("/api/needed", { shift_id: id, needed });
+      showMsg(r.opened ? `${r.opened} spot(s) opened. The agent is inviting people.`
+        : r.removed.length ? `Removed and notified: ${r.removed.join(", ")}.` : "Saved.");
       loadRota();
     }
 
@@ -199,14 +200,15 @@
         `<div class="${r.kind}"><span class="muted">${r.time.slice(11)}</span> ${esc(r.text)}</div>`).join("");
       const offers = await api("/api/offers");
       document.getElementById("offers").innerHTML = offers.map(o =>
-        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.date.slice(5)} ${o.shift_name} ${o.role} ${o.start}-${o.end}</span>
-         <span class="pill ${o.status}">${o.status}${o.partly_until ? " until " + o.partly_until : ""}</span></div>`).join("")
+        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.date.slice(5)} ${o.shift_name} ${o.start}-${o.end}</span>
+         <span class="pill ${o.status}">${o.status}</span></div>`).join("")
         || '<span class="muted">None yet.</span>';
     }
 
     async function loadSettings() {
       const s = await api("/api/settings");
-      document.getElementById("timeout").value = s.offer_timeout_seconds;
+      document.getElementById("timeout").value = s.offer_timeout_minutes;
+      document.getElementById("demo_speed").value = s.demo_speed;
       document.getElementById("use_ai").checked = s.use_ai === "1";
       document.getElementById("bots_on").checked = s.bots_on === "1";
       document.getElementById("aiStatus").textContent = s.ai_ready

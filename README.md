@@ -4,27 +4,41 @@
 
 When a worker calls in sick, or the shop suddenly needs more people, a manager
 spends an hour phoning around. **Rota Rescue** does it for them: an AI agent
-(the *Shift Filler*) invites the right workers in the app, handles Yes / No /
-Partly / no answer, updates the rota and tells the manager. Every worked shift
+(the *Shift Filler*) invites the right workers in the app, handles Accept / Decline /
+no answer, updates the rota and tells the manager. Every worked shift
 is saved, so monthly hours and pay come out of one click.
 
 Track 1: Autonomous Agents & Intelligent Systems.
 
 ## What it does (nothing more)
 
-1. **7-day plan**: the manager sets the shifts for the next 7 days (dates, hours,
-   role, number of workers per shift) and presses **Send to agent**. Only then does
-   the agent start inviting workers: the right role, one shift per day per person,
-   fewest hours first. It keeps going in waves until every shift is full.
-2. **Sick call**: a worker taps "Report sick". 1 spot opens. The agent asks
-   available workers one at a time until someone says Yes.
-3. **Demand surge**: the manager changes "needed" (for example 15 to 20). 5 spots
-   open. The agent invites people in waves and stops when full. No overbooking.
+1. **7-day plan**: the manager sets the shifts for the next 7 days (hours and number
+   of workers per shift) and presses **Send to agent**. Only then does the agent start
+   inviting workers: one shift per day per person, fewest hours first. It keeps going
+   until every shift is full.
+2. **Sick call**: a worker taps "Report sick". 1 spot opens. The agent asks one person
+   at a time until someone accepts.
+3. **Change the number needed** (current week): on the rota, the manager changes
+   "Needed" for a shift.
+   - **More people**: new spots open and the agent invites people. Nobody loses a shift.
+   - **Fewer people**: open spots are cancelled first. If still too many, the most
+     recently booked people are removed, and each gets one message in their inbox.
 4. **Monthly pay**: "Close day" saves the day's shifts. The monthly report shows
-   hours x one hourly rate = gross pay, with CSV export. Sick = 0 hours.
+   hours x one hourly rate = gross pay, with CSV export. Sick = 0 hours. Removed
+   bookings are not paid.
 
-"Available" means: has the shift's role, is not already working that day, and has no
-other invitation waiting for that day. No skills, licences or other rules.
+**Answers and timing.** Workers answer **Accept** or **Decline**. They have
+**3 minutes** to answer (5 minutes is an option on the manager page). If there is no
+answer after **2 minutes**, the agent also asks the next person. The first person to
+accept gets the shift, and the other invitations for that shift are cancelled
+automatically ("No longer needed").
+
+**No spam.** A worker never has more than one invitation waiting at a time, is never
+asked twice for the same shift, and gets each message only once. The AI is only
+called when there is something to do, at most every 3 seconds.
+
+"Available" means: not already working that day, not asked for that shift before,
+and no other invitation waiting. No skills, licences or other rules.
 
 ## Setup (once)
 
@@ -60,29 +74,34 @@ Open http://localhost:8000 on the laptop. On a phone on the same Wi-Fi, open
 
 ## Demo logins
 
-| Name | PIN | Role |
+| Name | PIN | Note |
 |---|---|---|
 | Manager | 0000 | Manager dashboard |
-| Anna Kovacs | 1111 | Cashier. Few hours this month, so the agent asks her first |
-| Bence Nagy | 2222 | Cashier, 2nd in line |
-| Csilla Toth | 3333 | Cashier, 3rd in line |
-| David Szabo | 4444 | Stock. Asked first for Stock shifts |
-| Eva Horvath | 5555 | Cashier, 4th in line |
+| Anna Kovacs | 1111 | Fewest hours this month, so the agent asks her first |
+| Bence Nagy | 2222 | 2nd in line |
+| Csilla Toth | 3333 | 3rd in line |
+| David Szabo | 4444 | 4th in line |
+| Eva Horvath | 5555 | 5th in line |
 | Everyone else | 1234 | Fake workers. If "Fake workers answer by themselves" is on, they answer automatically |
 
 ## Demo script (about 3 minutes)
 
-1. Manager page: set **Answer timeout** to 20 seconds (speeds up the demo).
-2. **Plan the next 7 days**: keep the 4 default shifts (Morning/Evening x Cashier/Stock),
-   raise Saturday's numbers, press **Send to agent**. The log shows the staffing request
-   and the first invitation waves. Fake workers start answering by themselves.
-3. Anna's phone gets an offer and taps **Yes**. She is booked; the rota updates.
-4. Bence taps **Partly**, until 10:00. The spot is split; the agent asks the next person
-   for the rest.
-5. Anna taps **Report sick** on her new shift. The agent finds a replacement.
+1. Manager page, Demo settings: set **Demo speed** to 10x (3 minutes becomes 18
+   seconds, the 2-minute step becomes 12 seconds).
+2. **Plan the next 7 days**: keep Morning and Evening, raise Saturday's numbers, press
+   **Send to agent**. The log shows the request and the first invitations. Fake workers
+   answer by themselves.
+3. Anna's phone gets an offer. She does nothing: after "2 minutes" the agent also asks
+   the next person. Then Anna taps **Accept** first: she gets the shift and the other
+   invitation is cancelled automatically.
+4. Anna taps **Report sick** on her new shift. The agent finds a replacement (shown as
+   "cover" in the monthly report).
+5. On the rota, lower a shift's "Needed" by 1. The most recently booked person is
+   removed and gets one message.
 6. **Close day**, open **Monthly report**, **Download CSV**.
 
-Use **Reset demo data** on the manager page before the real pitch.
+Use **Reset demo data** on the manager page before the real pitch, and set Demo speed
+back to Real time for real use.
 
 ## How it works
 
@@ -92,10 +111,11 @@ phone / laptop browser  (static/*.html, refreshes every 3 s)
 FastAPI  (app/main.py)  ── background loop every 1 s:
         |                   timeouts, fake-worker answers, run agent if something happened
         |
-engine.py   plain code: open spots, send offers, first-Yes-wins lock, Partly split,
-        |               timeouts, close day, monthly report
+engine.py   plain code: open spots, send offers, first-Accept-wins lock, cancel other invitations,
+        |               2-min escalation, timeouts, close day, monthly report
 agent.py    Shift Filler agent (OpenAI Agents SDK): decides WHO to ask and HOW MANY
         |   tools: get_open_needs, list_available_workers, send_offers, give_up
+        |   (only called when something can be done, at most every 3 s)
 SQLite  (rota.db, created by app/seed.py)
 ```
 
@@ -112,7 +132,7 @@ booking, pay). If the AI call fails, the plain rules take over, so the demo neve
 | `app/main.py` | API routes and background loop | Dev A |
 | `app/seed.py` | Demo data (workers, shifts, past hours) | Dev A |
 | `static/login.html` | Login (name + PIN) | Dev B (pages) |
-| `static/staff.html` | My shifts, Report sick, Inbox with Yes / No / Partly | Dev B |
+| `static/staff.html` | My shifts, Report sick, Inbox with Accept / Decline and messages | Dev B |
 | `static/manager.html` | Live rota, needed box, agent log, settings | Dev B |
 | `static/report.html` | Monthly hours and pay, CSV | Dev B |
 | `static/style.css`, `static/common.js` | Shared look and helpers | Dev B |
