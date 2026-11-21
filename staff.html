@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rota Rescue - My shifts</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+  <header><h1 id="hello">Rota Rescue</h1><button onclick="logout()">Log out</button></header>
+  <main style="max-width:560px">
+    <div id="msg" class="msg"></div>
+
+    <div class="card">
+      <h2>Inbox</h2>
+      <div id="inbox" class="muted">Loading...</div>
+    </div>
+
+    <div class="card">
+      <h2>My shifts</h2>
+      <div id="shifts" class="muted">Loading...</div>
+    </div>
+  </main>
+  <script src="/static/common.js"></script>
+  <script>
+    let seenOffers = new Set();
+    let firstLoad = true;
+
+    async function loadShifts() {
+      const rows = await api("/api/my-shifts");
+      document.getElementById("shifts").innerHTML = rows.length ? rows.map(s => `
+        <div class="row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee">
+          <div><b>${esc(s.date)}</b> ${esc(s.shift_name)} (${esc(s.role)}) ${esc(s.start)}-${esc(s.end)}
+            ${s.is_replacement ? '<span class="pill">cover</span>' : ""}
+            <span class="pill ${s.status}">${s.status}</span></div>
+          ${s.status === "working" ? `<button class="no" onclick="reportSick(${s.id})">Report sick</button>` : ""}
+        </div>`).join("") : "No upcoming shifts.";
+    }
+
+    async function reportSick(id) {
+      if (!confirm("Report sick for this shift? We will find someone to cover it.")) return;
+      await api("/api/report-sick", { assignment_id: id });
+      showMsg("Get well soon! We are finding someone to cover your shift.");
+      loadShifts();
+    }
+
+    async function loadInbox() {
+      const data = await api("/api/inbox");
+      const box = document.getElementById("inbox");
+      if (!data.offers.length) { box.innerHTML = "No offers yet."; return; }
+      box.innerHTML = data.offers.map(o => {
+        const isNew = !seenOffers.has(o.id);
+        seenOffers.add(o.id);
+        if (isNew && !firstLoad && o.status === "waiting") notify(o);
+        if (o.status === "waiting") return `
+          <div class="offer">
+            <b>Can you work ${esc(o.shift_name)} (${esc(o.role)}) on ${esc(o.date)}, ${esc(o.start)}-${esc(o.end)}?</b>
+            <p class="muted">Please answer within ${data.timeout_seconds} seconds.</p>
+            <div class="row">
+              <button class="yes" onclick="answer(${o.id}, 'yes')">Yes</button>
+              <button class="no" onclick="answer(${o.id}, 'no')">No</button>
+              <button class="partly" onclick="answerPartly(${o.id}, '${o.start}', '${o.end}')">Partly</button>
+            </div>
+          </div>`;
+        const text = { yes: "You said Yes. Booked!", no: "You said No.", partly: `You work until ${o.partly_until}.`,
+                       timeout: "No answer in time.", too_late: "Already filled, thanks anyway!" }[o.status];
+        return `<div style="padding:6px 0" class="muted">${esc(o.date)} ${esc(o.start)}-${esc(o.end)}:
+                <span class="pill ${o.status}">${o.status}</span> ${esc(text)}</div>`;
+      }).join("");
+      firstLoad = false;
+    }
+
+    async function answer(id, ans, until) {
+      try {
+        const r = await api("/api/answer", { offer_id: id, answer: ans, until });
+        showMsg(r.message);
+      } catch (e) { showMsg(e.message); }
+      loadInbox(); loadShifts();
+    }
+
+    function answerPartly(id, start, end) {
+      const until = prompt(`Until what time can you work? (between ${start} and ${end}, e.g. 21:00)`);
+      if (until) answer(id, "partly", until.trim().padStart(5, "0"));
+    }
+
+    function notify(o) {
+      if ("Notification" in window && Notification.permission === "granted")
+        new Notification("New shift offer", { body: `${o.shift_name} ${o.date} ${o.start}-${o.end}` });
+    }
+
+    (async () => {
+      const me = await api("/api/me");
+      document.getElementById("hello").textContent = "Hi, " + me.name.split(" ")[0];
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+      loadShifts(); loadInbox();
+      setInterval(loadInbox, 3000);   // inbox refreshes every 3 seconds
+      setInterval(loadShifts, 10000);
+    })();
+  </script>
+</body>
+</html>

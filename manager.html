@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rota Rescue - Manager</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+  <header>
+    <h1>Rota Rescue &middot; Manager</h1>
+    <div class="row"><a href="/static/report.html">Monthly report</a><button onclick="logout()">Log out</button></div>
+  </header>
+  <main>
+    <div id="msg" class="msg"></div>
+
+    <nav class="section-links" aria-label="Manager sections"><a href="#planner">Planner</a><a href="#schedule">Schedule</a><a href="#activity">Activity</a></nav>
+    <div class="card" id="planner">
+      <div class="plan-head"><div><h2>Weekly shift planner</h2>
+        <p>Set the hours and default team size for each shift.</p></div>
+        <label>Week starting<input id="planStart" type="date"></label></div>
+      <div class="plan-section"><div class="table-scroll"><table id="templates" aria-label="Shift settings"></table></div></div>
+      <div class="plan-section"><h3>Daily staffing</h3>
+        <p class="muted">Adjust headcount for each day. Enter 0 to skip a shift.</p>
+        <div class="table-scroll"><table id="grid" aria-label="Daily staffing"></table></div></div>
+      <div class="plan-footer"><div><strong id="planTotal"></strong><small>Sending starts worker invitations.</small></div>
+        <button onclick="sendPlan()">Send to agent &rarr;</button></div>
+    </div>
+
+    <div class="card row" id="schedule">
+      <b>Day:</b> <select id="day" onchange="loadRota()"></select>
+      <button class="light" onclick="closeDay()">Close day (save hours)</button>
+      <span id="aiStatus" class="muted"></span>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div id="rota"></div>
+      </div>
+      <div>
+        <div class="card" id="activity">
+          <h2>Agent log</h2>
+          <div class="muted">Bold = message for you. Blue = the agent's reasons.</div>
+          <div id="log" class="log"></div>
+        </div>
+        <div class="card">
+          <h2>Invitations</h2>
+          <div id="offers" class="log"></div>
+        </div>
+        <div class="card">
+          <h2>Demo settings</h2>
+          <div class="row">Answer timeout (seconds):
+            <input id="timeout" type="number" style="width:90px"><button class="light" onclick="saveSetting('offer_timeout_seconds', timeout.value)">Save</button></div>
+          <p class="row"><label><input type="checkbox" id="use_ai" onchange="saveSetting('use_ai', this.checked ? 1 : 0)"> Use AI agent (off = plain rules)</label></p>
+          <p class="row"><label><input type="checkbox" id="bots_on" onchange="saveSetting('bots_on', this.checked ? 1 : 0)"> Fake workers answer by themselves</label></p>
+          <button class="no" onclick="resetDemo()">Reset demo data</button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/static/common.js"></script>
+  <script>
+    let openShift = null;   // which shift's people list is expanded
+
+    // ---------------------------------------------------------- planner ---
+    const templates = [
+      { name: "Morning", start: "06:00", end: "14:00", needed: 5 },
+      { name: "Evening", start: "14:00", end: "22:00", needed: 5 },
+    ];
+    let counts = {};   // "templateIndex|date" -> number
+
+    function planDates() {
+      const start = document.getElementById("planStart").value;
+      if (!start) return [];
+      return [...Array(7)].map((_, i) => {
+        const d = new Date(start + "T12:00:00"); d.setDate(d.getDate() + i);
+        return d.toISOString().slice(0, 10);
+      });
+    }
+    function dayLabel(iso) {
+      return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "numeric" });
+    }
+
+    function renderTemplates() {
+      document.getElementById("templates").innerHTML =
+        `<tr><th>Shift</th><th>Start</th><th>End</th><th>People per day</th></tr>` +
+        templates.map((t, i) => `<tr>
+          <th scope="row"><span class="shift-tag shift-${i}">${esc(t.name)}</span></th>
+          <td><input type="time" aria-label="${t.name} start" value="${t.start}" onchange="setT(${i}, 'start', this.value)"></td>
+          <td><input type="time" aria-label="${t.name} end" value="${t.end}" onchange="setT(${i}, 'end', this.value)"></td>
+          <td><input type="number" min="0" aria-label="${t.name} needed" value="${t.needed}" style="width:70px" onchange="setT(${i}, 'needed', +this.value, true)"></td>
+          </tr>`).join("");
+      renderGrid();
+    }
+    function setT(i, key, value, resetDays) {
+      templates[i][key] = value;
+      if (resetDays) planDates().forEach(d => delete counts[i + "|" + d]);
+      renderGrid();
+    }
+    function countFor(i, d) { const k = i + "|" + d; return k in counts ? counts[k] : templates[i].needed; }
+
+    function renderGrid() {
+      const dates = planDates();
+      document.getElementById("grid").innerHTML =
+        `<tr><th>Shift</th>${dates.map(d => `<th>${dayLabel(d)}</th>`).join("")}</tr>` +
+        templates.map((t, i) => `<tr><th scope="row"><span class="shift-tag shift-${i}">${esc(t.name)}</span><br><span class="muted">${t.start}–${t.end}</span></th>` +
+          dates.map(d => `<td><input type="number" min="0" aria-label="${t.name} headcount for ${d}" value="${countFor(i, d)}" style="width:60px"
+            onchange="counts['${i}|${d}'] = +this.value; showTotal()"></td>`).join("") + `</tr>`).join("");
+      showTotal();
+    }
+    function planRows() {
+      const rows = [];
+      planDates().forEach(d => templates.forEach((t, i) => {
+        const needed = countFor(i, d);
+        if (needed > 0) rows.push({ date: d, name: t.name, start: t.start, end: t.end, role: "Any", needed });
+      }));
+      return rows;
+    }
+    function showTotal() {
+      const rows = planRows();
+      document.getElementById("planTotal").textContent =
+        `${rows.length} shifts, ${rows.reduce((a, r) => a + r.needed, 0)} staffing slots.`;
+    }
+    async function sendPlan() {
+      const rows = planRows();
+      if (!rows.length) return showMsg("The plan is empty.");
+      if (!confirm(`Send this plan to the agent? It will start inviting workers for ` +
+                   `${rows.reduce((a, r) => a + r.needed, 0)} spots.`)) return;
+      try {
+        const r = await api("/api/plan", { rows });
+        showMsg(`Sent. ${r.spots} spot(s) opened. The agent is inviting workers now.`);
+        document.getElementById("day").innerHTML = "";
+        loadRota(); loadLog();
+      } catch (e) { showMsg(e.message); }
+    }
+    async function initPlanner() {
+      document.getElementById("planStart").value = new Date().toISOString().slice(0, 10);
+      document.getElementById("planStart").onchange = renderGrid;
+      renderTemplates();
+    }
+
+    async function loadRota() {
+      const day = document.getElementById("day").value;
+      const data = await api("/api/rota" + (day ? "?day=" + day : ""));
+      const daySel = document.getElementById("day");
+      if (daySel.options.length !== data.days.length)
+        daySel.innerHTML = data.days.map(d => `<option ${d === data.day ? "selected" : ""}>${d}</option>`).join("");
+      if (!data.shifts.length) {
+        document.getElementById("rota").innerHTML =
+          '<div class="card muted">No shifts on this day yet. Plan the week above and send it to the agent.</div>';
+        return;
+      }
+      document.getElementById("rota").innerHTML = data.shifts.map(s => {
+        const open = s.open_spots.filter(o => o.status === "open").length;
+        const unfilled = s.open_spots.filter(o => o.status === "unfilled").length;
+        return `<div class="card">
+          <h2>${esc(s.name)} · ${esc(s.role)} ${esc(s.start)}-${esc(s.end)}</h2>
+          <div class="row">
+            <span class="pill working">${s.working} / ${s.needed} staffed</span>
+            ${open ? `<span class="pill open">${open} open spot(s)</span>` : ""}
+            ${unfilled ? `<span class="pill unfilled">${unfilled} unfilled</span>` : ""}
+          </div>
+          <p class="row">Needed: <input id="need${s.id}" type="number" value="${s.needed}" style="width:80px">
+            <button onclick="changeNeeded(${s.id})">Update</button>
+            <button class="light" onclick="toggle(${s.id})">${openShift === s.id ? "Hide" : "Show"} people</button></p>
+          ${s.open_spots.map(o => `<div class="muted">Spot ${o.start}-${o.end} (${o.reason}) <span class="pill ${o.status}">${o.status}</span></div>`).join("")}
+          ${openShift === s.id ? `<table><tr><th>Name</th><th>Time</th><th>Status</th></tr>${s.people.map(p => `
+            <tr><td>${esc(p.name)} ${p.is_replacement ? '<span class="pill">cover</span>' : ""}</td>
+            <td>${p.start}-${p.end}</td><td><span class="pill ${p.status}">${p.status}</span></td></tr>`).join("")}</table>` : ""}
+        </div>`;
+      }).join("");
+    }
+
+    function toggle(id) { openShift = openShift === id ? null : id; loadRota(); }
+
+    async function changeNeeded(id) {
+      const r = await api("/api/needed", { shift_id: id, needed: +document.getElementById("need" + id).value });
+      showMsg(r.opened ? `${r.opened} spot(s) opened. The agent is inviting people.` : "Saved.");
+      loadRota();
+    }
+
+    async function loadLog() {
+      const rows = await api("/api/log");
+      document.getElementById("log").innerHTML = rows.map(r =>
+        `<div class="${r.kind}"><span class="muted">${r.time.slice(11)}</span> ${esc(r.text)}</div>`).join("");
+      const offers = await api("/api/offers");
+      document.getElementById("offers").innerHTML = offers.map(o =>
+        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.date.slice(5)} ${o.shift_name} ${o.role} ${o.start}-${o.end}</span>
+         <span class="pill ${o.status}">${o.status}${o.partly_until ? " until " + o.partly_until : ""}</span></div>`).join("")
+        || '<span class="muted">None yet.</span>';
+    }
+
+    async function loadSettings() {
+      const s = await api("/api/settings");
+      document.getElementById("timeout").value = s.offer_timeout_seconds;
+      document.getElementById("use_ai").checked = s.use_ai === "1";
+      document.getElementById("bots_on").checked = s.bots_on === "1";
+      document.getElementById("aiStatus").textContent = s.ai_ready
+        ? "AI agent: ON" : "AI agent: OFF (no OPENAI_API_KEY or switched off), using plain rules";
+    }
+
+    async function saveSetting(key, value) {
+      await api("/api/settings", { key, value: String(value) });
+      showMsg("Saved."); loadSettings();
+    }
+
+    async function closeDay() {
+      const r = await api("/api/close-day", { day: document.getElementById("day").value });
+      showMsg(`Day closed: ${r.records} shift records saved. See the monthly report.`);
+    }
+
+    async function resetDemo() {
+      if (!confirm("Delete everything and load fresh demo data?")) return;
+      await api("/api/reset", {});
+      location.reload();
+    }
+
+    (async () => {
+      const me = await api("/api/me");
+      if (!me.is_manager) { location.href = "/static/staff.html"; return; }
+      await initPlanner();
+      await loadRota(); loadLog(); loadSettings();
+      setInterval(() => { loadRota(); loadLog(); }, 3000);   // live refresh
+    })();
+  </script>
+</body>
+</html>

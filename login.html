@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rota Rescue - Log in</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body class="login">
+  <header><h1>Rota Rescue</h1></header>
+  <main style="max-width:420px">
+    <div class="card">
+      <h2>Log in</h2>
+      <p class="muted">Pick your name and type your PIN.</p>
+      <label for="name">Name</label><select id="name" class="full"></select>
+      <label for="pin">PIN</label><input id="pin" class="full" type="password" inputmode="numeric">
+      <button class="full" onclick="login()">Log in</button>
+      <p id="error" style="color:#c62828"></p>
+    </div>
+  </main>
+  <script src="/static/common.js"></script>
+  <script>
+    async function loadNames() {
+      const names = await api("/api/names");
+      document.getElementById("name").innerHTML = names.map(n => `<option>${esc(n)}</option>`).join("");
+    }
+    async function login() {
+      try {
+        const r = await api("/api/login", {
+          name: document.getElementById("name").value, pin: document.getElementById("pin").value,
+        });
+        location.href = r.is_manager ? "/static/manager.html" : "/static/staff.html";
+      } catch (e) { document.getElementById("error").textContent = e.message; }
+    }
+    document.getElementById("pin").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+    loadNames();
+  </script>
+</body>
+</html>
