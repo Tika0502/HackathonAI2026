@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rota Rescue - Manager</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Rota Rescue - Manager</h1>
+    <div class="row"><a href="/static/report.html">Monthly report</a><button onclick="logout()">Log out</button></div>
+  </header>
+  <main>
+    <div id="msg" class="msg"></div>
+    <div class="card row">
+      <b>Day:</b> <select id="day" onchange="loadRota()"></select>
+      <button class="light" onclick="closeDay()">Close day (save hours)</button>
+      <span id="aiStatus" class="muted"></span>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div id="rota"></div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Agent log</h2>
+          <div class="muted">Bold = message for you. Blue = the agent's reasons.</div>
+          <div id="log" class="log"></div>
+        </div>
+        <div class="card">
+          <h2>Invitations</h2>
+          <div id="offers" class="log"></div>
+        </div>
+        <div class="card">
+          <h2>Demo settings</h2>
+          <div class="row">Answer timeout (seconds):
+            <input id="timeout" type="number" style="width:90px"><button class="light" onclick="saveSetting('offer_timeout_seconds', timeout.value)">Save</button></div>
+          <p class="row"><label><input type="checkbox" id="use_ai" onchange="saveSetting('use_ai', this.checked ? 1 : 0)"> Use AI agent (off = plain rules)</label></p>
+          <p class="row"><label><input type="checkbox" id="bots_on" onchange="saveSetting('bots_on', this.checked ? 1 : 0)"> Fake workers answer by themselves</label></p>
+          <button class="no" onclick="resetDemo()">Reset demo data</button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/static/common.js"></script>
+  <script>
+    let openShift = null;   // which shift's people list is expanded
+
+    async function loadRota() {
+      const day = document.getElementById("day").value;
+      const data = await api("/api/rota" + (day ? "?day=" + day : ""));
+      const daySel = document.getElementById("day");
+      if (!daySel.options.length)
+        daySel.innerHTML = data.days.map(d => `<option ${d === data.day ? "selected" : ""}>${d}</option>`).join("");
+      document.getElementById("rota").innerHTML = data.shifts.map(s => {
+        const open = s.open_spots.filter(o => o.status === "open").length;
+        const unfilled = s.open_spots.filter(o => o.status === "unfilled").length;
+        return `<div class="card">
+          <h2>${esc(s.name)} ${esc(s.start)}-${esc(s.end)}</h2>
+          <div class="row">
+            <span class="pill working">${s.working} / ${s.needed} staffed</span>
+            ${open ? `<span class="pill open">${open} open spot(s)</span>` : ""}
+            ${unfilled ? `<span class="pill unfilled">${unfilled} unfilled</span>` : ""}
+          </div>
+          <p class="row">Needed: <input id="need${s.id}" type="number" value="${s.needed}" style="width:80px">
+            <button onclick="changeNeeded(${s.id})">Update</button>
+            <button class="light" onclick="toggle(${s.id})">${openShift === s.id ? "Hide" : "Show"} people</button></p>
+          ${s.open_spots.map(o => `<div class="muted">Spot ${o.start}-${o.end} (${o.reason}) <span class="pill ${o.status}">${o.status}</span></div>`).join("")}
+          ${openShift === s.id ? `<table><tr><th>Name</th><th>Time</th><th>Status</th></tr>${s.people.map(p => `
+            <tr><td>${esc(p.name)} ${p.is_replacement ? '<span class="pill">cover</span>' : ""}</td>
+            <td>${p.start}-${p.end}</td><td><span class="pill ${p.status}">${p.status}</span></td></tr>`).join("")}</table>` : ""}
+        </div>`;
+      }).join("");
+    }
+
+    function toggle(id) { openShift = openShift === id ? null : id; loadRota(); }
+
+    async function changeNeeded(id) {
+      const r = await api("/api/needed", { shift_id: id, needed: +document.getElementById("need" + id).value });
+      showMsg(r.opened ? `${r.opened} spot(s) opened. The agent is inviting people.` : "Saved.");
+      loadRota();
+    }
+
+    async function loadLog() {
+      const rows = await api("/api/log");
+      document.getElementById("log").innerHTML = rows.map(r =>
+        `<div class="${r.kind}"><span class="muted">${r.time.slice(11)}</span> ${esc(r.text)}</div>`).join("");
+      const offers = await api("/api/offers");
+      document.getElementById("offers").innerHTML = offers.map(o =>
+        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.shift_name} ${o.start}-${o.end}</span>
+         <span class="pill ${o.status}">${o.status}${o.partly_until ? " until " + o.partly_until : ""}</span></div>`).join("")
+        || '<span class="muted">None yet.</span>';
+    }
+
+    async function loadSettings() {
+      const s = await api("/api/settings");
+      document.getElementById("timeout").value = s.offer_timeout_seconds;
+      document.getElementById("use_ai").checked = s.use_ai === "1";
+      document.getElementById("bots_on").checked = s.bots_on === "1";
+      document.getElementById("aiStatus").textContent = s.ai_ready
+        ? "AI agent: ON" : "AI agent: OFF (no OPENAI_API_KEY or switched off), using plain rules";
+    }
+
+    async function saveSetting(key, value) {
+      await api("/api/settings", { key, value: String(value) });
+      showMsg("Saved."); loadSettings();
+    }
+
+    async function closeDay() {
+      const r = await api("/api/close-day", { day: document.getElementById("day").value });
+      showMsg(`Day closed: ${r.records} shift records saved. See the monthly report.`);
+    }
+
+    async function resetDemo() {
+      if (!confirm("Delete everything and load fresh demo data?")) return;
+      await api("/api/reset", {});
+      location.reload();
+    }
+
+    (async () => {
+      const me = await api("/api/me");
+      if (!me.is_manager) { location.href = "/static/staff.html"; return; }
+      await loadRota(); loadLog(); loadSettings();
+      setInterval(() => { loadRota(); loadLog(); }, 3000);   // live refresh
+    })();
+  </script>
+</body>
+</html>
