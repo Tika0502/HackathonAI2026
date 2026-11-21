@@ -35,6 +35,48 @@ LAST = ["Kiss", "Molnar", "Nemeth", "Farkas", "Balogh", "Papp", "Lakatos", "Taka
 SHIFTS = [("Morning", "06:00", "14:00", 15), ("Evening", "14:00", "22:00", 15)]
 
 
+def staff_this_week(rng=None):
+    """THIS week (today + next 6 days) gets staffed Morning and Evening shifts,
+    so the manager can change numbers and workers can report sick right away.
+    The NEXT week is planned by the manager in the app.
+
+    Days that already have shifts are left alone, so this is safe to run on an
+    existing database (the app runs it at start-up). Nobody works two shifts on
+    the same day. Returns how many days were filled."""
+    rng = rng or random.Random()
+    demo_ids = {r["name"]: r["id"] for r in db.query("SELECT id, name FROM workers WHERE is_demo = 1")}
+    fake_ids = [r["id"] for r in db.query(
+        "SELECT id FROM workers WHERE is_manager = 0 AND is_demo = 0 ORDER BY id")]
+    if not fake_ids:
+        return 0
+    today = date.today()
+    filled = 0
+    for d in range(7):
+        day = (today + timedelta(days=d)).isoformat()
+        if db.query_one("SELECT 1 FROM shifts WHERE date = ?", (day,)):
+            continue
+        filled += 1
+        people = fake_ids[:]
+        rng.shuffle(people)
+        for idx, (name, start, end, needed) in enumerate(SHIFTS):
+            shift_id = db.execute(
+                "INSERT INTO shifts(date, name, start, end, needed) VALUES (?, ?, ?, ?, ?)",
+                (day, name, start, end, needed),
+            )
+            team = people[idx * needed:(idx + 1) * needed]
+            if d == 0 and name == "Evening" and "Eva Horvath" in demo_ids:
+                team = team[:-1] + [demo_ids["Eva Horvath"]]      # Eva reports sick in the demo
+            if d == 1 and name == "Morning":
+                extra = [demo_ids[n] for n, _, _ in DEMO_WORKERS[:4] if n in demo_ids]
+                team = team[:len(team) - len(extra)] + extra
+            for wid in team:
+                db.execute(
+                    "INSERT INTO assignments(shift_id, worker_id, start, end) VALUES (?, ?, ?, ?)",
+                    (shift_id, wid, start, end),
+                )
+    return filled
+
+
 def seed():
     rng = random.Random(42)
     # Drop the tables instead of deleting rota.db: on Windows the running server
@@ -56,29 +98,7 @@ def seed():
 
     today = date.today()
 
-    # THIS week (today + next 6 days) is already staffed, so the manager can
-    # change numbers and workers can report sick right away. The NEXT week is
-    # planned by the manager in the app.
-    # Nobody works two shifts on the same day.
-    for d in range(7):
-        day = (today + timedelta(days=d)).isoformat()
-        people = fake_ids[:]
-        rng.shuffle(people)
-        for idx, (name, start, end, needed) in enumerate(SHIFTS):
-            shift_id = db.execute(
-                "INSERT INTO shifts(date, name, start, end, needed) VALUES (?, ?, ?, ?, ?)",
-                (day, name, start, end, needed),
-            )
-            team = people[idx * needed:(idx + 1) * needed]
-            if d == 0 and name == "Evening":
-                team = team[:-1] + [demo_ids["Eva Horvath"]]      # Eva reports sick in the demo
-            if d == 1 and name == "Morning":
-                team = team[:-4] + [demo_ids[n] for n, _, _ in DEMO_WORKERS[:4]]
-            for wid in team:
-                db.execute(
-                    "INSERT INTO assignments(shift_id, worker_id, start, end) VALUES (?, ?, ?, ?)",
-                    (shift_id, wid, start, end),
-                )
+    staff_this_week(rng)
 
     # Past shift records for this month (1st .. yesterday) so the report has data.
     first_of_month = today.replace(day=1)

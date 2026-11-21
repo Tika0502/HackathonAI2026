@@ -46,10 +46,16 @@ async def background_loop():
 
 @asynccontextmanager
 async def lifespan(app):
+    from .seed import seed, staff_this_week
     if not db.DB_PATH.exists():
-        from .seed import seed
         seed()
     db.init_db()
+    # Older databases (or ones seeded before this week was staffed) have no
+    # shifts for this week: fill the missing days so the live rota always works.
+    if not db.query_one("SELECT 1 FROM shifts WHERE date = ?", (date.today().isoformat(),)):
+        days = staff_this_week()
+        if days:
+            print(f"Filled {days} day(s) of this week with demo staff.")
     task = asyncio.create_task(background_loop())
     yield
     task.cancel()

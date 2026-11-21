@@ -3,53 +3,72 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rota Rescue - Manager</title>
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <header>
-    <h1>Rota Rescue &middot; Manager</h1>
+    <h1>Rota Rescue - Manager</h1>
     <div class="row"><a href="/static/report.html">Monthly report</a><button onclick="logout()">Log out</button></div>
   </header>
   <main>
     <div id="msg" class="msg"></div>
 
-    <nav class="section-links" aria-label="Manager sections"><a href="#planner">Planner</a><a href="#schedule">Schedule</a><a href="#activity">Activity</a></nav>
-    <div class="card" id="planner">
-      <div class="plan-head"><div><h2>Weekly shift planner</h2>
-        <p>Set the hours and default team size for each shift.</p></div>
-        <label>Week starting<input id="planStart" type="date"></label></div>
-      <div class="plan-section"><div class="table-scroll"><table id="templates" aria-label="Shift settings"></table></div></div>
-      <div class="plan-section"><h3>Daily staffing</h3>
-        <p class="muted">Adjust headcount for each day. Enter 0 to skip a shift.</p>
-        <div class="table-scroll"><table id="grid" aria-label="Daily staffing"></table></div></div>
-      <div class="plan-footer"><div><strong id="planTotal"></strong><small>Sending starts worker invitations.</small></div>
-        <button onclick="sendPlan()">Send to agent &rarr;</button></div>
-    </div>
+    <p class="muted">Drag a panel by its title bar to reorder. Click a title to open or close it.</p>
+    <div id="panels">
+      <details class="card panel" id="p-week" open>
+        <summary><span class="handle">&#x2630;</span> This week: live rota</summary>
+        <div class="row" style="margin-top:10px">
+          <b>Day:</b> <select id="day" onchange="loadRota()"></select>
+          <button class="light" onclick="closeDay()">Close day (save hours)</button>
+          <span id="aiStatus" class="muted"></span>
+        </div>
+        <p class="muted">Change "Needed" to add or remove people. Use "Show people" to mark someone sick
+          or absent (for example when they phone in).</p>
+        <div id="rota"></div>
+      </details>
 
-    <div class="card row" id="schedule">
-      <b>Day:</b> <select id="day" onchange="loadRota()"></select>
-      <button class="light" onclick="closeDay()">Close day (save hours)</button>
-      <span id="aiStatus" class="muted"></span>
+      <details class="card panel" id="p-shifts" open>
+        <summary><span class="handle">&#x2630;</span> Next week, part 1: shifts and default number of people</summary>
+        <p class="muted">Set each shift's hours and how many people it needs. This number is used for
+          every day; change single days in part 2.</p>
+        <div class="row">Week starts: <input id="planStart" type="date"></div>
+        <div style="overflow-x:auto"><table id="templates"></table></div>
+        <p class="row"><button class="light" onclick="addTemplate()">+ Add shift</button></p>
+      </details>
+
+      <details class="card panel" id="p-days" open>
+        <summary><span class="handle">&#x2630;</span> Next week, part 2: workers needed per day</summary>
+        <p class="muted">Starts with the defaults from part 1. Change any day, e.g. more people at the
+          weekend. 0 = no shift that day. Nobody is contacted until you press <b>Send to agent</b>.</p>
+        <div style="overflow-x:auto"><table id="grid"></table></div>
+        <p class="row"><button onclick="sendPlan()">Send to agent</button>
+          <span id="planTotal" class="muted"></span></p>
+      </details>
     </div>
 
     <div class="grid">
       <div>
-        <div id="rota"></div>
-      </div>
-      <div>
-        <div class="card" id="activity">
+        <div class="card">
           <h2>Agent log</h2>
           <div class="muted">Bold = message for you. Blue = the agent's reasons.</div>
           <div id="log" class="log"></div>
         </div>
+      </div>
+      <div>
         <div class="card">
           <h2>Invitations</h2>
           <div id="offers" class="log"></div>
         </div>
         <div class="card">
           <h2>Demo settings</h2>
-          <div class="row">Answer timeout (seconds):
-            <input id="timeout" type="number" style="width:90px"><button class="light" onclick="saveSetting('offer_timeout_seconds', timeout.value)">Save</button></div>
+          <div class="row">Time to answer:
+            <select id="timeout" onchange="saveSetting('offer_timeout_minutes', this.value)">
+              <option value="3">3 minutes (default)</option><option value="5">5 minutes</option></select></div>
+          <p class="muted">No answer after 2 minutes: the next person is asked too. First to accept gets the shift.</p>
+          <div class="row">Demo speed:
+            <select id="demo_speed" onchange="saveSetting('demo_speed', this.value)">
+              <option value="1">Real time</option><option value="10">10x faster (3 min = 18 s)</option>
+              <option value="30">30x faster (3 min = 6 s)</option></select></div>
           <p class="row"><label><input type="checkbox" id="use_ai" onchange="saveSetting('use_ai', this.checked ? 1 : 0)"> Use AI agent (off = plain rules)</label></p>
           <p class="row"><label><input type="checkbox" id="bots_on" onchange="saveSetting('bots_on', this.checked ? 1 : 0)"> Fake workers answer by themselves</label></p>
           <button class="no" onclick="resetDemo()">Reset demo data</button>
@@ -60,11 +79,12 @@
   <script src="/static/common.js"></script>
   <script>
     let openShift = null;   // which shift's people list is expanded
+    let needDraft = {};     // numbers the manager is typing (kept while the rota refreshes)
 
     // ---------------------------------------------------------- planner ---
-    const templates = [
-      { name: "Morning", start: "06:00", end: "14:00", needed: 5 },
-      { name: "Evening", start: "14:00", end: "22:00", needed: 5 },
+    let templates = [
+      { name: "Morning", start: "06:00", end: "14:00", needed: 3 },
+      { name: "Evening", start: "14:00", end: "22:00", needed: 3 },
     ];
     let counts = {};   // "templateIndex|date" -> number
 
@@ -82,13 +102,13 @@
 
     function renderTemplates() {
       document.getElementById("templates").innerHTML =
-        `<tr><th>Shift</th><th>Start</th><th>End</th><th>People per day</th></tr>` +
+        `<tr><th>Shift</th><th>Start</th><th>End</th><th>People per day (default)</th><th></th></tr>` +
         templates.map((t, i) => `<tr>
-          <th scope="row"><span class="shift-tag shift-${i}">${esc(t.name)}</span></th>
-          <td><input type="time" aria-label="${t.name} start" value="${t.start}" onchange="setT(${i}, 'start', this.value)"></td>
-          <td><input type="time" aria-label="${t.name} end" value="${t.end}" onchange="setT(${i}, 'end', this.value)"></td>
-          <td><input type="number" min="0" aria-label="${t.name} needed" value="${t.needed}" style="width:70px" onchange="setT(${i}, 'needed', +this.value, true)"></td>
-          </tr>`).join("");
+          <td><input value="${esc(t.name)}" style="width:110px" onchange="setT(${i}, 'name', this.value)"></td>
+          <td><input type="time" value="${t.start}" onchange="setT(${i}, 'start', this.value)"></td>
+          <td><input type="time" value="${t.end}" onchange="setT(${i}, 'end', this.value)"></td>
+          <td><input type="number" min="0" value="${t.needed}" style="width:70px" onchange="setT(${i}, 'needed', +this.value, true)"></td>
+          <td><button class="light" onclick="removeTemplate(${i})">Remove</button></td></tr>`).join("");
       renderGrid();
     }
     function setT(i, key, value, resetDays) {
@@ -96,14 +116,19 @@
       if (resetDays) planDates().forEach(d => delete counts[i + "|" + d]);
       renderGrid();
     }
+    function addTemplate() {
+      templates.push({ name: "Night", start: "22:00", end: "06:00", needed: 1 });
+      counts = {}; renderTemplates();
+    }
+    function removeTemplate(i) { templates.splice(i, 1); counts = {}; renderTemplates(); }
     function countFor(i, d) { const k = i + "|" + d; return k in counts ? counts[k] : templates[i].needed; }
 
     function renderGrid() {
       const dates = planDates();
       document.getElementById("grid").innerHTML =
         `<tr><th>Shift</th>${dates.map(d => `<th>${dayLabel(d)}</th>`).join("")}</tr>` +
-        templates.map((t, i) => `<tr><th scope="row"><span class="shift-tag shift-${i}">${esc(t.name)}</span><br><span class="muted">${t.start}–${t.end}</span></th>` +
-          dates.map(d => `<td><input type="number" min="0" aria-label="${t.name} headcount for ${d}" value="${countFor(i, d)}" style="width:60px"
+        templates.map((t, i) => `<tr><td>${esc(t.name)}<br><span class="muted">${t.start}-${t.end}</span></td>` +
+          dates.map(d => `<td><input type="number" min="0" value="${countFor(i, d)}" style="width:60px"
             onchange="counts['${i}|${d}'] = +this.value; showTotal()"></td>`).join("") + `</tr>`).join("");
       showTotal();
     }
@@ -111,14 +136,14 @@
       const rows = [];
       planDates().forEach(d => templates.forEach((t, i) => {
         const needed = countFor(i, d);
-        if (needed > 0) rows.push({ date: d, name: t.name, start: t.start, end: t.end, role: "Any", needed });
+        if (needed > 0) rows.push({ date: d, name: t.name, start: t.start, end: t.end, needed });
       }));
       return rows;
     }
     function showTotal() {
       const rows = planRows();
       document.getElementById("planTotal").textContent =
-        `${rows.length} shifts, ${rows.reduce((a, r) => a + r.needed, 0)} staffing slots.`;
+        `${rows.length} shifts, ${rows.reduce((a, r) => a + r.needed, 0)} workers to find.`;
     }
     async function sendPlan() {
       const rows = planRows();
@@ -133,7 +158,12 @@
       } catch (e) { showMsg(e.message); }
     }
     async function initPlanner() {
-      document.getElementById("planStart").value = new Date().toISOString().slice(0, 10);
+      // Next week = the day after the last day that already has shifts (or 7 days from today).
+      const rota = await api("/api/rota");
+      const last = rota.days.length ? rota.days[rota.days.length - 1] : null;
+      const start = new Date((last || new Date().toISOString().slice(0, 10)) + "T12:00:00");
+      start.setDate(start.getDate() + (last ? 1 : 7));
+      document.getElementById("planStart").value = start.toISOString().slice(0, 10);
       document.getElementById("planStart").onchange = renderGrid;
       renderTemplates();
     }
@@ -146,35 +176,88 @@
         daySel.innerHTML = data.days.map(d => `<option ${d === data.day ? "selected" : ""}>${d}</option>`).join("");
       if (!data.shifts.length) {
         document.getElementById("rota").innerHTML =
-          '<div class="card muted">No shifts on this day yet. Plan the week above and send it to the agent.</div>';
+          '<div class="muted">No shifts on this day yet. Plan the week below and send it to the agent.</div>';
         return;
       }
       document.getElementById("rota").innerHTML = data.shifts.map(s => {
         const open = s.open_spots.filter(o => o.status === "open").length;
         const unfilled = s.open_spots.filter(o => o.status === "unfilled").length;
-        return `<div class="card">
-          <h2>${esc(s.name)} · ${esc(s.role)} ${esc(s.start)}-${esc(s.end)}</h2>
+        return `<div class="shiftbox">
+          <h2>${esc(s.name)} ${esc(s.start)}-${esc(s.end)}</h2>
           <div class="row">
             <span class="pill working">${s.working} / ${s.needed} staffed</span>
             ${open ? `<span class="pill open">${open} open spot(s)</span>` : ""}
             ${unfilled ? `<span class="pill unfilled">${unfilled} unfilled</span>` : ""}
           </div>
-          <p class="row">Needed: <input id="need${s.id}" type="number" value="${s.needed}" style="width:80px">
-            <button onclick="changeNeeded(${s.id})">Update</button>
+          <p class="row">Needed: <input id="need${s.id}" type="number" min="0" value="${s.id in needDraft ? needDraft[s.id] : s.needed}"
+            style="width:80px" oninput="needDraft[${s.id}] = this.value">
+            <button onclick="changeNeeded(${s.id}, ${s.working})">Update</button>
             <button class="light" onclick="toggle(${s.id})">${openShift === s.id ? "Hide" : "Show"} people</button></p>
           ${s.open_spots.map(o => `<div class="muted">Spot ${o.start}-${o.end} (${o.reason}) <span class="pill ${o.status}">${o.status}</span></div>`).join("")}
-          ${openShift === s.id ? `<table><tr><th>Name</th><th>Time</th><th>Status</th></tr>${s.people.map(p => `
+          ${openShift === s.id ? `<table><tr><th>Name</th><th>Time</th><th>Status</th><th></th></tr>${s.people.map(p => `
             <tr><td>${esc(p.name)} ${p.is_replacement ? '<span class="pill">cover</span>' : ""}</td>
-            <td>${p.start}-${p.end}</td><td><span class="pill ${p.status}">${p.status}</span></td></tr>`).join("")}</table>` : ""}
+            <td>${p.start}-${p.end}</td><td><span class="pill ${p.status}">${p.status}</span></td>
+            <td>${p.status === "working" ? `<button class="light" onclick="markSick(${p.id}, '${esc(p.name)}')">Mark sick / absent</button>` : ""}</td></tr>`).join("")}</table>` : ""}
         </div>`;
       }).join("");
     }
 
+    async function markSick(assignmentId, name) {
+      if (!confirm(`Mark ${name} as sick / absent? The agent will look for a replacement.`)) return;
+      const r = await api("/api/mark-sick", { assignment_id: assignmentId });
+      showMsg(r.ok ? `${name} marked sick. The agent is finding a replacement.` : r.error);
+      loadRota(); loadLog();
+    }
+
+    // ------------------------------------------- drag & drop + open/closed panels ---
+    function setupPanels() {
+      const box = document.getElementById("panels");
+      const saved = JSON.parse(localStorage.getItem("panels") || "null");
+      if (saved) {
+        saved.order.forEach(id => { const el = document.getElementById(id); if (el) box.appendChild(el); });
+        box.querySelectorAll(".panel").forEach(el => { if (id_in(saved.closed, el.id)) el.open = false; });
+      }
+      let dragged = null;
+      box.querySelectorAll(".panel").forEach(el => {
+        el.addEventListener("dragstart", e => {
+          if (!e.target.classList || !e.target.classList.contains("panel")) return;
+          dragged = el; el.classList.add("dragging");
+        });
+        el.addEventListener("dragend", () => {
+          el.classList.remove("dragging"); dragged = null; el.draggable = false; savePanels();
+        });
+        el.addEventListener("dragover", e => {
+          e.preventDefault();
+          if (!dragged || dragged === el) return;
+          const r = el.getBoundingClientRect();
+          box.insertBefore(dragged, e.clientY < r.top + r.height / 2 ? el : el.nextSibling);
+        });
+        el.addEventListener("toggle", savePanels);
+        // Only the title bar starts a drag, so typing in the inputs still works.
+        el.draggable = false;
+        el.querySelector("summary").addEventListener("mousedown", () => (el.draggable = true));
+        el.querySelector("summary").addEventListener("touchstart", () => (el.draggable = true));
+        document.addEventListener("mouseup", () => { if (!dragged) el.draggable = false; });
+      });
+    }
+    function id_in(list, id) { return (list || []).includes(id); }
+    function savePanels() {
+      const els = [...document.querySelectorAll("#panels .panel")];
+      localStorage.setItem("panels", JSON.stringify({
+        order: els.map(e => e.id), closed: els.filter(e => !e.open).map(e => e.id),
+      }));
+    }
+
     function toggle(id) { openShift = openShift === id ? null : id; loadRota(); }
 
-    async function changeNeeded(id) {
-      const r = await api("/api/needed", { shift_id: id, needed: +document.getElementById("need" + id).value });
-      showMsg(r.opened ? `${r.opened} spot(s) opened. The agent is inviting people.` : "Saved.");
+    async function changeNeeded(id, working) {
+      const needed = +document.getElementById("need" + id).value;
+      if (needed < working && !confirm(`Only ${needed} needed but ${working} are booked. ` +
+          `The most recently booked people will be removed and get a message. Continue?`)) return;
+      const r = await api("/api/needed", { shift_id: id, needed });
+      delete needDraft[id];
+      showMsg(r.opened ? `${r.opened} spot(s) opened. The agent is inviting people.`
+        : r.removed.length ? `Removed and notified: ${r.removed.join(", ")}.` : "Saved.");
       loadRota();
     }
 
@@ -184,14 +267,15 @@
         `<div class="${r.kind}"><span class="muted">${r.time.slice(11)}</span> ${esc(r.text)}</div>`).join("");
       const offers = await api("/api/offers");
       document.getElementById("offers").innerHTML = offers.map(o =>
-        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.date.slice(5)} ${o.shift_name} ${o.role} ${o.start}-${o.end}</span>
-         <span class="pill ${o.status}">${o.status}${o.partly_until ? " until " + o.partly_until : ""}</span></div>`).join("")
+        `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.date.slice(5)} ${o.shift_name} ${o.start}-${o.end}</span>
+         <span class="pill ${o.status}">${o.status}</span></div>`).join("")
         || '<span class="muted">None yet.</span>';
     }
 
     async function loadSettings() {
       const s = await api("/api/settings");
-      document.getElementById("timeout").value = s.offer_timeout_seconds;
+      document.getElementById("timeout").value = s.offer_timeout_minutes;
+      document.getElementById("demo_speed").value = s.demo_speed;
       document.getElementById("use_ai").checked = s.use_ai === "1";
       document.getElementById("bots_on").checked = s.bots_on === "1";
       document.getElementById("aiStatus").textContent = s.ai_ready
@@ -217,6 +301,7 @@
     (async () => {
       const me = await api("/api/me");
       if (!me.is_manager) { location.href = "/static/staff.html"; return; }
+      setupPanels();
       await initPlanner();
       await loadRota(); loadLog(); loadSettings();
       setInterval(() => { loadRota(); loadLog(); }, 3000);   // live refresh
