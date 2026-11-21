@@ -2,7 +2,7 @@
 
 ## Hackathon details
 **Agentic AI Hackathon: Innovate & Build.** Run by GDGoC University of Debrecen and ISU Informatics.
-- **When:** Saturday, 21 Nov 2026, 10:00–19:00 CET. That's about 9 hours, so scope hard.
+- **When:** Saturday, 21 Nov 2026, 10:00–19:00 CET. The team has only **about 2 hours for building** the MVP, so scope very hard.
 - **Where:** In person at the Learning Center, Debrecen.
 - **Theme:** Agentic AI ("Code. Create. Innovate.")
 - **Team size:** 2–4 people.
@@ -16,7 +16,9 @@
 - **Not published yet:** agenda, submission format and deadline, sponsor APIs, and whether code written before the event is allowed. Check Discord for these.
 
 ## Our project
-<!-- TODO: once chosen — problem, target user, core demo flow, stack, run commands, team split -->
+- **Track:** 1, Autonomous Agents & Intelligent Systems (chosen by the team).
+- **Research:** see `research/problem-research.md`.
+<!-- TODO: target user, problem, core demo flow, stack, run commands, team split -->
 
 ---
 
