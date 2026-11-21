@@ -12,11 +12,13 @@ Track 1: Autonomous Agents & Intelligent Systems.
 
 ## What it does (nothing more)
 
-1. **7-day plan**: the manager sets the shifts for the next 7 days (hours and number
-   of workers per shift) and presses **Send to agent**. Only then does the agent start
-   inviting workers: one shift per day per person, fewest hours first. It keeps going
-   until every shift is full.
-2. **Sick call**: a worker taps "Report sick". 1 spot opens. The agent asks one person
+1. **Plan next week**: this week is already staffed in the demo data. On the manager
+   page, part 1 sets each shift's hours and default number of people; part 2 shows
+   those hours per day and lets you change any single day. **Send to agent** starts the
+   invitations: one shift per day per person, fewest hours first. The manager page
+   panels can be opened, closed and dragged into any order (remembered in the browser).
+2. **Sick call / can't come**: a worker taps "Report sick / can't come", or the manager
+   opens "Show people" on a shift and taps "Mark sick / absent" (when someone phones in). 1 spot opens. The agent asks one person
    at a time until someone accepts.
 3. **Change the number needed** (current week): on the rota, the manager changes
    "Needed" for a shift.
@@ -88,16 +90,15 @@ Open http://localhost:8000 on the laptop. On a phone on the same Wi-Fi, open
 
 1. Manager page, Demo settings: set **Demo speed** to 10x (3 minutes becomes 18
    seconds, the 2-minute step becomes 12 seconds).
-2. **Plan the next 7 days**: keep Morning and Evening, raise Saturday's numbers, press
-   **Send to agent**. The log shows the request and the first invitations. Fake workers
-   answer by themselves.
-3. Anna's phone gets an offer. She does nothing: after "2 minutes" the agent also asks
-   the next person. Then Anna taps **Accept** first: she gets the shift and the other
-   invitation is cancelled automatically.
-4. Anna taps **Report sick** on her new shift. The agent finds a replacement (shown as
-   "cover" in the monthly report).
-5. On the rota, lower a shift's "Needed" by 1. The most recently booked person is
-   removed and gets one message.
+2. **Sick call**: Eva (5555) taps **Report sick / can't come** on today's evening shift.
+   The live rota shows 1 open spot and the agent asks Anna first (fewest hours).
+3. Anna does nothing: after "2 minutes" the agent also asks Bence. Anna then taps
+   **Accept** first: she gets the shift and Bence's invitation is cancelled automatically.
+4. **More people**: raise today's Morning "Needed" from 15 to 18. The agent invites in
+   waves and stops when full. **Fewer people**: lower it to 14. Open spots are cancelled
+   first, then the most recently booked people are removed and each gets one message.
+5. **Next week**: in part 1 set the hours and default people, in part 2 raise Saturday,
+   press **Send to agent**.
 6. **Close day**, open **Monthly report**, **Download CSV**.
 
 Use **Reset demo data** on the manager page before the real pitch, and set Demo speed
