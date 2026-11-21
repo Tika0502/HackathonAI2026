@@ -107,3 +107,4 @@ input,select,#planner input {border:1px solid #cdd3df;border-radius:10px;backgro
   button:active {transform:scale(.98)}
   .msg {animation:page-in 180ms var(--ease)}
 }
+.pill.ai { background: #e3e8ff; color: #2b3fa8; font-weight: 600; }

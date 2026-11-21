@@ -254,6 +254,7 @@ def get_settings(worker_id: str = Cookie(None)):
     require_manager(worker_id)
     values = {r["key"]: r["value"] for r in db.query("SELECT * FROM settings")}
     values["ai_ready"] = agent.ai_enabled()
+    values["ai_status"] = agent.ai_status()
     return values
 
 
@@ -291,6 +292,7 @@ def reset(worker_id: str = Cookie(None)):
     from .seed import seed
     seed()
     engine.state["escalated"].clear()
+    agent.ai_state["paused_until"] = 0.0
     return {"ok": True}
 
 

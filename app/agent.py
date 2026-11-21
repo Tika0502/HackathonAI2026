@@ -5,8 +5,10 @@ an offer timed out). It looks at the open needs, decides who to ask and how
 many, and stops. The exact work (locks, timeouts, booking) is done by the
 plain code in engine.py.
 """
+import asyncio
 import json
 import os
+import time
 
 from agents import Agent, Runner, function_tool
 
@@ -71,20 +73,54 @@ shift_filler = Agent(
 )
 
 
+AI_TIMEOUT_SECONDS = 30      # one agent run may take at most this long
+AI_PAUSE_AFTER_ERROR = 60    # after an AI error, use the plain rules for this long
+ai_state = {"paused_until": 0.0, "last_error": ""}
+
+
 def ai_enabled():
     return db.get_setting("use_ai") == "1" and bool(os.getenv("OPENAI_API_KEY"))
 
 
+def ai_status():
+    """Text for the manager page: is the AI deciding right now, or the rules?"""
+    if db.get_setting("use_ai") != "1":
+        return "Rules (AI switched off)"
+    if not os.getenv("OPENAI_API_KEY"):
+        return "Rules (no OPENAI_API_KEY in .env)"
+    if time.monotonic() < ai_state["paused_until"]:
+        return f"Rules for now (AI error: {ai_state['last_error']}; retrying soon)"
+    return f"AI agent ({MODEL})"
+
+
 async def run_filler():
-    """Called by the background loop in main.py when something happened."""
+    """Called by the background loop in main.py when something happened.
+
+    Safety net: the AI gets at most 30 s. On ANY error, timeout or a run that
+    leaves work undone, the plain rules finish the job, so the demo never stalls.
+    After an error the AI is paused for 60 s so a broken key doesn't slow every event."""
     if not engine.needs_action():   # nothing to do: don't call the AI at all
         return
-    if not ai_enabled():
+    use_ai = ai_enabled() and time.monotonic() >= ai_state["paused_until"]
+    if not use_ai:
+        engine.state["decider"] = "Rules"
         engine.plain_fill()
         return
+    engine.state["decider"] = "AI"
     try:
-        await Runner.run(shift_filler, "Something changed. Check the open needs and take the next step.",
-                         max_turns=20)
+        await asyncio.wait_for(
+            Runner.run(shift_filler, "Something changed. Check the open needs and take the next step.",
+                       max_turns=20),
+            timeout=AI_TIMEOUT_SECONDS,
+        )
     except Exception as e:  # the demo must not break if the AI fails
-        engine.log(f"AI agent failed ({type(e).__name__}). Used plain rules instead.", kind="system")
+        name = "timeout" if isinstance(e, asyncio.TimeoutError) else type(e).__name__
+        ai_state["last_error"] = name
+        ai_state["paused_until"] = time.monotonic() + AI_PAUSE_AFTER_ERROR
+        engine.log(f"AI agent failed ({name}). The plain rules took over; AI retries in "
+                   f"{AI_PAUSE_AFTER_ERROR} s.", kind="system")
+    finally:
+        engine.state["decider"] = "Rules"
+    # Whatever the AI did (or didn't), the rules fill any gap that is still open.
+    if engine.needs_action():
         engine.plain_fill()

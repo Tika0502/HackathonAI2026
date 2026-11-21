@@ -8,7 +8,8 @@
 <body>
   <header>
     <h1>Rota Rescue - Manager</h1>
-    <div class="row"><a href="/static/report.html">Monthly report</a><button onclick="logout()">Log out</button></div>
+    <div class="row"><button onclick="resetDemo()" title="Delete everything and load the fresh demo data">Reset demo</button>
+      <a href="/static/report.html">Monthly report</a><button onclick="logout()">Log out</button></div>
   </header>
   <main>
     <div id="msg" class="msg"></div>
@@ -50,7 +51,8 @@
       <div>
         <div class="card">
           <h2>Agent log</h2>
-          <div class="muted">Bold = message for you. Blue = the agent's reasons.</div>
+          <div class="muted">Bold = message for you. Blue = who was asked and why:
+            <span class="pill ai">AI agent</span> = decided by the AI, <span class="pill">Rules</span> = plain rules (fallback).</div>
           <div id="log" class="log"></div>
         </div>
       </div>
@@ -265,12 +267,19 @@
     async function loadLog() {
       const rows = await api("/api/log");
       document.getElementById("log").innerHTML = rows.map(r =>
-        `<div class="${r.kind}"><span class="muted">${r.time.slice(11)}</span> ${esc(r.text)}</div>`).join("");
+        `<div class="${r.kind}"><span class="muted">${r.time.slice(11)}</span> ${tagged(r.text)}</div>`).join("");
       const offers = await api("/api/offers");
       document.getElementById("offers").innerHTML = offers.map(o =>
         `<div>${esc(o.name)} <span class="muted">wave ${o.wave}, ${o.date.slice(5)} ${o.shift_name} ${o.start}-${o.end}</span>
          <span class="pill ${o.status}">${o.status}</span></div>`).join("")
         || '<span class="muted">None yet.</span>';
+    }
+
+    // "[AI agent] ..." / "[Rules] ..." -> a coloured label + the text
+    function tagged(text) {
+      const m = /^\[(AI agent|Rules)\] (.*)$/s.exec(text);
+      if (!m) return esc(text);
+      return `<span class="pill ${m[1] === "AI agent" ? "ai" : ""}">${m[1]}</span> ${esc(m[2])}`;
     }
 
     async function loadSettings() {
@@ -279,8 +288,7 @@
       document.getElementById("demo_speed").value = s.demo_speed;
       document.getElementById("use_ai").checked = s.use_ai === "1";
       document.getElementById("bots_on").checked = s.bots_on === "1";
-      document.getElementById("aiStatus").textContent = s.ai_ready
-        ? "AI agent: ON" : "AI agent: OFF (no OPENAI_API_KEY or switched off), using plain rules";
+      document.getElementById("aiStatus").textContent = "Who decides: " + s.ai_status;
     }
 
     async function saveSetting(key, value) {
@@ -306,6 +314,7 @@
       await initPlanner();
       await loadRota(); loadLog(); loadSettings();
       setInterval(() => { loadRota(); loadLog(); }, 3000);   // live refresh
+      setInterval(loadSettings, 10000);                       // keeps "Who decides" up to date
     })();
   </script>
 </body>
