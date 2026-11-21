@@ -20,7 +20,7 @@ from . import db
 # in main.py sees it and runs the agent (at most every few seconds).
 # escalated: offers that already passed the 2-minute mark, so the agent is
 # woken only once per offer.
-state = {"needs_agent_run": False, "escalated": set()}
+state = {"needs_agent_run": False, "escalated": set(), "decider": "Rules"}
 
 ESCALATE_AFTER_MINUTES = 2   # no answer after 2 min -> also ask the next person
 
@@ -347,7 +347,8 @@ def send_offers(spot_id, worker_ids, reason=""):
         )
         sent.append(allowed[wid]["name"])
     if sent:
-        log(f"{shift_label(spot['shift_id'])}: asked {', '.join(sent)}. {reason}".strip(), spot_id)
+        who = "AI agent" if state["decider"] == "AI" else "Rules"
+        log(f"[{who}] {shift_label(spot['shift_id'])}: asked {', '.join(sent)}. {reason}".strip(), spot_id)
     return {"ok": True, "sent_to": sent, "skipped_ids": skipped, "limit": limit}
 
 
@@ -360,7 +361,8 @@ def give_up(spot_id, message):
         return {"ok": False, "error": "Invitations are still waiting. Wait for their answers."}
     db.execute("UPDATE open_spots SET status = 'unfilled' WHERE shift_id = ? AND status = 'open'",
                (spot["shift_id"],))
-    log(message, spot_id, kind="manager")
+    who = "AI agent" if state["decider"] == "AI" else "Rules"
+    log(f"[{who}] {message}", spot_id, kind="manager")
     return {"ok": True}
 
 
@@ -501,7 +503,7 @@ def plain_fill():
         spot_id = need["spot_id"]
         if need["to_send"] > 0 and need["available_now"] > 0:
             chosen = available_workers(spot_id)[:need["to_send"]]
-            reason = "Rule: fewest hours this month first (" + ", ".join(
+            reason = "Fewest hours this month first (" + ", ".join(
                 f"{c['name']} {c['hours_this_month']:g}h" for c in chosen) + ")."
             send_offers(spot_id, [c["id"] for c in chosen], reason)
         elif not need["anyone_left"]:

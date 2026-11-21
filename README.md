@@ -88,10 +88,14 @@ Open http://localhost:8000 on the laptop. On a phone on the same Wi-Fi, open
 
 ## Demo script (about 3 minutes)
 
+0. Before the pitch: log in as **Manager** (PIN 0000) and press **Reset demo** at the
+   top of the page. Open a second phone/tab as Eva (5555) and one as Anna (1111).
 1. Manager page, Demo settings: set **Demo speed** to 10x (3 minutes becomes 18
-   seconds, the 2-minute step becomes 12 seconds).
-2. **Sick call**: Eva (5555) taps **Report sick / can't come** on today's evening shift.
+   seconds, the 2-minute step becomes 12 seconds). Point at **Who decides**: it says
+   "AI agent (...)" when the OpenAI key works, or "Rules (...)" and why when it doesn't.
+2. **Sick call**: Eva taps **Report sick / can't come** on today's evening shift.
    The live rota shows 1 open spot and the agent asks Anna first (fewest hours).
+   In the **Agent log** each line has a pill: **AI agent** or **Rules**, plus the reason.
 3. Anna does nothing: after "2 minutes" the agent also asks Bence. Anna then taps
    **Accept** first: she gets the shift and Bence's invitation is cancelled automatically.
 4. **More people**: raise today's Morning "Needed" from 15 to 18. The agent invites in
@@ -101,8 +105,9 @@ Open http://localhost:8000 on the laptop. On a phone on the same Wi-Fi, open
    press **Send to agent**.
 6. **Close day**, open **Monthly report**, **Download CSV**.
 
-Use **Reset demo data** on the manager page before the real pitch, and set Demo speed
-back to Real time for real use.
+Safety net: if OpenAI is slow (over 30 s), fails or returns nothing useful, the plain
+rules finish the job and the log says so. The AI is retried after 60 s, so the demo
+never stalls. Set Demo speed back to Real time for real use.
 
 ## How it works
 
